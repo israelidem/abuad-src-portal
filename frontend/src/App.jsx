@@ -5,6 +5,9 @@ import { MessageSquare, CheckCircle, Clock, PlusCircle, X, Upload, Shield, User,
 const FOREST_GREEN = '#006633';
 const MAX_YELLOW = '#FAF92A';
 
+// Dynamic API Base URL configuration
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
 export default function App() {
   // Authentication & Session States
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -62,7 +65,7 @@ export default function App() {
   const fetchLiveTickets = async () => {
     setIsLoadingLive(true);
     try {
-      const response = await fetch('http://localhost:5000/api/feedback');
+      const response = await fetch(`${API_BASE_URL}/api/feedback`);
       const data = await response.json();
       setLiveTickets(data);
     } catch (error) {
@@ -129,7 +132,7 @@ export default function App() {
         };
     
     try {
-      const response = await fetch(`http://localhost:5000/api/auth/${endpoint}`, {
+      const response = await fetch(`${API_BASE_URL}/api/auth/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -184,7 +187,7 @@ export default function App() {
     setAuthError('');
 
     try {
-      const response = await fetch('http://localhost:5000/api/auth/verify-otp', {
+      const response = await fetch(`${API_BASE_URL}/api/auth/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -225,7 +228,7 @@ export default function App() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch('http://localhost:5000/api/feedback', {
+      const response = await fetch(`${API_BASE_URL}/api/feedback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
@@ -252,7 +255,7 @@ export default function App() {
     else if (currentStatus === 'In Progress') nextStatus = 'Resolved';
 
     try {
-      const response = await fetch(`http://localhost:5000/api/feedback/${id}/status`, {
+      const response = await fetch(`${API_BASE_URL}/api/feedback/${id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: nextStatus }),

@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from 'react';
 
+// Dynamic API Base URL configuration
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
 const AdminDashboard = () => {
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -9,7 +12,7 @@ const AdminDashboard = () => {
   useEffect(() => {
     const fetchTickets = async () => {
       try {
-        const response = await fetch('http://localhost:5000/api/feedback');
+        const response = await fetch(`${API_BASE_URL}/api/feedback`);
         const data = await response.json();
         setTickets(data);
       } catch (error) {
@@ -25,7 +28,7 @@ const AdminDashboard = () => {
   // 2. Handle status updates (Pending -> In Progress -> Resolved)
   const handleStatusChange = async (id, newStatus) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/feedback/${id}/status`, {
+      const response = await fetch(`${API_BASE_URL}/api/feedback/${id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
