@@ -32,17 +32,25 @@ export function AuthProvider({ children }) {
 
   // Guards against a slow profile fetch resolving after sign-out
   const activeUserId = useRef(null);
+  // Mirrors `profile`. The auth listener's closure is created once, so
+  // reading the state variable inside it would always see the initial null.
+  const profileRef = useRef(null);
+
+  const commitProfile = (value) => {
+    profileRef.current = value;
+    setProfile(value);
+  };
 
   const loadProfile = async (userId) => {
     activeUserId.current = userId;
     try {
       const { profile: fetched } = await authApi.me();
       if (activeUserId.current !== userId) return; // stale response
-      setProfile(fetched);
+      commitProfile(fetched);
       setError(null);
     } catch (err) {
       if (activeUserId.current !== userId) return;
-      setProfile(null);
+      commitProfile(null);
       // A 401 here means the token is stale — sign out rather than
       // leave the UI in a half-authenticated state.
       if (err.status === 401) {
@@ -74,13 +82,18 @@ export function AuthProvider({ children }) {
 
       if (!newSession?.user) {
         activeUserId.current = null;
-        setProfile(null);
+        commitProfile(null);
         setLoading(false);
         return;
       }
 
       // TOKEN_REFRESHED fires often and the profile hasn't changed
-      if (event === 'TOKEN_REFRESHED' && profile) return;
+      if (event === 'TOKEN_REFRESHED' && profileRef.current) return;
+
+      // signIn() already loaded the profile before it resolved, so by the
+      // time SIGNED_IN arrives we have it. Re-fetching would flip `loading`
+      // back on and flash a spinner over the page we just navigated to.
+      if (profileRef.current && activeUserId.current === newSession.user.id) return;
 
       setLoading(true);
       await loadProfile(newSession.user.id);
@@ -111,6 +124,17 @@ export function AuthProvider({ children }) {
       throw new Error(message);
     }
 
+    // Load the profile *before* resolving. Login navigates to a guarded
+    // route the instant this returns; leaving the fetch to the
+    // onAuthStateChange listener means the guard can run first, see
+    // `isAuthenticated === false` and bounce straight back to /login.
+    setSession(data.session ?? null);
+    if (data.session?.user) {
+      setLoading(true);
+      await loadProfile(data.session.user.id);
+      setLoading(false);
+    }
+
     return data;
   };
 
@@ -136,7 +160,7 @@ export function AuthProvider({ children }) {
   const signOut = async () => {
     activeUserId.current = null;
     await supabase.auth.signOut();
-    setProfile(null);
+    commitProfile(null);
     setSession(null);
   };
 
@@ -156,7 +180,7 @@ export function AuthProvider({ children }) {
   /** Optimistically merge a profile update without a round trip. */
   const updateProfile = async (updates) => {
     const { profile: updated } = await authApi.updateMe(updates);
-    setProfile(updated);
+    commitProfile(updated);
     return updated;
   };
 
@@ -169,6 +193,12 @@ export function AuthProvider({ children }) {
       error,
 
       isAuthenticated: Boolean(session && profile),
+
+      // True while we still don't know who the user is: either the initial
+      // session check is in flight, or a session exists but its profile
+      // hasn't arrived. Guards must wait on this rather than on `loading`,
+      // or they redirect during that gap.
+      resolving: loading || (Boolean(session?.user) && !profile && !error),
       isAdmin: profile?.role === 'ADMIN',
       isStaff: profile?.role === 'REP' || profile?.role === 'ADMIN',
       role: profile?.role ?? null,

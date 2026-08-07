@@ -7,12 +7,15 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
+    "build": "prisma generate",
+    "postinstall": "prisma generate",
     "migrate:dev": "dotenv -e .env -- npx prisma migrate dev",
     "migrate:deploy": "dotenv -e .env -- npx prisma migrate deploy",
     "db:push": "dotenv -e .env -- npx prisma db push",
     "generate": "prisma generate",
     "studio": "dotenv -e .env -- npx prisma studio",
     "check:db": "node scripts/check-db.mjs",
+    "smoke": "node scripts/smoke-routes.mjs",
     "sql:generate": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script > prisma/sql/00_schema.sql"
   },
   "dependencies": {
