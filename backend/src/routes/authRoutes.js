@@ -107,7 +107,7 @@ router.get(
   '/me',
   requireAuth,
   asyncHandler(async (req, res) => {
-    res.json({ user: req.user });
+    res.json({ profile: req.user });
   })
 );
 
@@ -140,7 +140,7 @@ router.patch(
       },
     });
 
-    res.json({ user: updated, message: 'Profile updated.' });
+    res.json({ profile: updated, message: 'Profile updated.' });
   })
 );
 

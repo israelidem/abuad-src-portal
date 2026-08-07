@@ -171,7 +171,7 @@ export default function Signup() {
             {emailHint && !emailHint.allowed && (
               <p className="mt-1 flex items-start gap-1 text-xs text-amber-700">
                 <Info size={13} className="mt-0.5 shrink-0" />
-                {emailHint.message}
+                {emailHint.reason}
               </p>
             )}
           </div>
