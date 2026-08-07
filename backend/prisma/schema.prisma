@@ -133,7 +133,7 @@ model Department {
 model Ticket {
   id           String         @id @default(uuid()) @db.Uuid
   /// Human-readable ID, e.g. SRC-000142 — generated from a Postgres sequence
-  ticketNumber String         @unique @map("ticket_number")
+  ticketNumber String         @unique @default(dbgenerated("public.next_ticket_number()")) @map("ticket_number")
 
   /// Always populated, even for anonymous tickets (abuse prevention).
   /// Identity is stripped at the API layer when `isAnonymous` is true.

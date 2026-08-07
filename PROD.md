@@ -246,11 +246,61 @@ Without these, password-reset links bounce to localhost.
 
 ---
 
-## Step 8 — Test
+## Step 8 — Ticket numbers (SQL done; needs a deploy)
+
+Ticket submission failed with `Argument 'ticketNumber' is missing`.
+
+`01_post_migration.sql` defined `next_ticket_number()` but never attached
+it to the column, so nothing ever called it. `ticket_number` is `NOT NULL`
+with no default, and the API doesn't supply one — `ticketRoutes.js` was
+written expecting the database to. The comment above that handler says
+*"ticket_number is assigned by a Postgres sequence"*, which was the
+intent; it just wasn't wired up.
+
+The fix has two halves and needs both:
+
+| Half | What it does | Status |
+|---|---|---|
+| `alter column ... set default` in SQL | Postgres fills the value | **Applied** ✅ |
+| `@default(dbgenerated(...))` in `schema.prisma` | Prisma stops demanding it | **Needs deploy** |
+
+**You already ran the SQL** — verified against your database:
+
+```
+column_default : next_ticket_number()
+function exists: true
+```
+
+So the remaining work is deploying the schema change. That error message
+comes from Prisma's *client-side* validation, which runs before any SQL is
+sent. Render is still using a client generated from the old schema, where
+`ticketNumber` is required — so it rejects the insert without ever asking
+Postgres. The database is ready; the deployed code isn't.
+
+**Push the commits.** Render's `postinstall` runs `prisma generate` on
+build, which regenerates the client from the updated schema. No further
+Supabase work needed.
+
+Verified locally against your real database: creating a ticket without
+passing `ticketNumber` produced `SRC-000001` (inside a rolled-back
+transaction, so nothing was persisted).
+
+If you ever need to re-check the database side:
+
+```sql
+select column_default from information_schema.columns
+ where table_name = 'tickets' and column_name = 'ticket_number';
+-- want: next_ticket_number()
+```
+
+---
+
+## Step 9 — Test
 
 1. Open the site in a **private window** (avoids a stale cached bundle)
 2. Sign in
 3. You should land on `/dashboard` and stay there
+4. Submit a test ticket — expect an `SRC-000001`-style number
 
 If you're still redirected, open DevTools → Network → the `/api/auth/me`
 request and use the table below.
@@ -270,6 +320,8 @@ request and use the table below.
 | **502** for ~50s then works | Free-tier cold start | Expected. Ping `/health` periodically |
 | `Profile not found.` (401) | Auth user exists, no `profiles` row | Trigger missing — rerun `01_post_migration.sql` (SETUP.md step 2) |
 | Login works, dashboard empty | API up, RLS blocking reads | Confirm `01_post_migration.sql` ran fully |
+| `Argument 'ticketNumber' is missing` | Old Prisma client deployed (schema change not pushed) | Step 8 — push, let `postinstall` regenerate |
+| `duplicate key ... ticket_number_key` | Sequence behind existing rows | Rerun the `setval(...)` block in `01_post_migration.sql` |
 
 ### Reading `/api/auth/me` correctly
 

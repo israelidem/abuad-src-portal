@@ -53,5 +53,44 @@ for (const { path, expect, note } of cases) {
   );
 }
 
+/**
+ * Schema guards — no database needed.
+ *
+ * Ticket creation broke because `ticket_number` was NOT NULL with no
+ * default: the SQL defined next_ticket_number() but never attached it to
+ * the column, and the API doesn't pass one. Prisma rejected every insert
+ * with "Argument `ticketNumber` is missing".
+ *
+ * The fix has two halves that must stay in step, so check both.
+ */
+const { readFile } = await import('node:fs/promises');
+const schemaUrl = new URL('../prisma/schema.prisma', import.meta.url);
+const sqlUrl = new URL('../prisma/sql/01_post_migration.sql', import.meta.url);
+
+const [schema, sql] = await Promise.all([
+  readFile(schemaUrl, 'utf8'),
+  readFile(sqlUrl, 'utf8'),
+]);
+
+const schemaChecks = [
+  {
+    ok: /ticketNumber\s+String[^\n]*@default\(dbgenerated\("public\.next_ticket_number\(\)"\)\)/.test(
+      schema
+    ),
+    note: 'schema.prisma: ticketNumber has dbgenerated default (Prisma allows omitting it)',
+  },
+  {
+    ok: /alter\s+column\s+ticket_number\s+set\s+default\s+public\.next_ticket_number\(\)/i.test(
+      sql
+    ),
+    note: '01_post_migration.sql: ticket_number column default is attached (Postgres fills it)',
+  },
+];
+
+for (const { ok, note } of schemaChecks) {
+  if (!ok) failures += 1;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${'[schema]'.padEnd(20)} -> ${'--'.padEnd(4)} ${note}`);
+}
+
 console.log(failures === 0 ? '\nSMOKE_OK' : `\nSMOKE_FAILED (${failures})`);
 process.exit(failures === 0 ? 0 : 1);

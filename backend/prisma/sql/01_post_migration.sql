@@ -73,6 +73,40 @@ as $$
   select 'SRC-' || lpad(nextval('public.ticket_number_seq')::text, 6, '0');
 $$;
 
+-- Attach it as the column default. Without this the function exists but
+-- nothing calls it, so every insert that omits ticket_number fails on the
+-- NOT NULL constraint. Prisma maps this to `dbgenerated()` in schema.prisma.
+alter table public.tickets
+  alter column ticket_number set default public.next_ticket_number();
+
+-- Backfill any rows that predate the default (column is NOT NULL, so an
+-- empty string is the only shape this can take).
+update public.tickets
+   set ticket_number = public.next_ticket_number()
+ where ticket_number = '';
+
+-- If tickets already exist, make sure the sequence sits above the highest
+-- number so the next insert can't collide with the unique index.
+do $$
+declare
+  max_num bigint;
+  seq_num bigint;
+begin
+  -- Cast per row, then take max. A text max() would compare
+  -- lexicographically and rank 'SRC-999999' above 'SRC-1000000'.
+  select coalesce(max((nullif(regexp_replace(ticket_number, '\D', '', 'g'), ''))::bigint), 0)
+    into max_num
+    from public.tickets;
+
+  select last_value into seq_num from public.ticket_number_seq;
+
+  -- Skip on a fresh install so numbering still starts at SRC-000001,
+  -- and never move the sequence backwards.
+  if max_num > 0 then
+    perform setval('public.ticket_number_seq', greatest(max_num, seq_num));
+  end if;
+end $$;
+
 
 -- ------------------------------------------------------------
 -- 4. Auto-create a profile whenever an auth user is created
