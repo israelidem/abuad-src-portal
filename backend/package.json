@@ -4,6 +4,9 @@
   "type": "module",
   "description": "ABUAD SRC Portal — Express API (Supabase + Prisma)",
   "main": "server.js",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",

@@ -1,0 +1,56 @@
+# Render blueprint for the ABUAD SRC Portal API.
+#
+# Keeping this in git means the build/start commands and health check
+# survive dashboard edits. Render reads it automatically on deploy.
+#
+# Secrets are deliberately NOT here — `sync: false` tells Render to prompt
+# for the value (or keep the one already set) instead of storing it in the
+# repo. Never commit SUPABASE_SERVICE_ROLE_KEY or DATABASE_URL.
+#
+# See PROD.md for where each value comes from.
+
+services:
+  - type: web
+    name: abuad-src-portal-backend
+    runtime: node
+    region: oregon
+    plan: free
+
+    # The repo is a monorepo; the API lives in backend/.
+    rootDir: backend
+
+    # `npm ci` respects package-lock.json. postinstall runs `prisma generate`,
+    # which must happen before the server starts or @prisma/client throws
+    # "did not initialize yet" on import.
+    buildCommand: npm ci
+    startCommand: npm start
+
+    # Hits the DB, so a 200 means Express AND Postgres are both reachable.
+    healthCheckPath: /health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # Render injects its own PORT; server.js already reads it.
+
+      # --- Supabase (Settings → API) ---
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      # Server-only. Bypasses Row Level Security — never expose to the browser.
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+
+      # --- Database (Settings → Database → Connection pooling) ---
+      # Must be the POOLED string (port 6543) with pgbouncer=true.
+      # The direct 5432 string will exhaust connections on the free plan.
+      - key: DATABASE_URL
+        sync: false
+
+      # --- CORS ---
+      # Comma-separated. Must include the exact Vercel origin, no trailing
+      # slash, or the browser blocks every request once the API is up.
+      - key: ALLOWED_ORIGINS
+        sync: false
