@@ -1,36 +1,85 @@
-import express from 'express';
-import mongoose from 'mongoose';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import feedbackRoutes from './routes/feedbackRoutes.js';
-import authRoutes from './routes/authRoutes.js'; // Import new authentication routes
+/**
+ * ABUAD SRC Portal — API entry point.
+ */
 
-dotenv.config();
+// env.js loads .env (relative to the backend folder) as a side effect of
+// being imported, so it must come before anything that reads process.env.
+import { env } from './src/config/env.js';
+
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import compression from 'compression';
+
+import { prisma } from './src/lib/prisma.js';
+import { apiLimiter } from './src/middleware/rateLimiter.js';
+import { errorHandler, notFoundHandler } from './src/middleware/errorHandler.js';
+import authRoutes from './src/routes/authRoutes.js';
+import ticketRoutes from './src/routes/ticketRoutes.js';
+import departmentRoutes from './src/routes/departmentRoutes.js';
 
 const app = express();
-const PORT = process.env.PORT || 5000;
 
-app.use(cors());
+// Render/Vercel/Fly sit behind a proxy — required for correct client IPs,
+// which rate limiting depends on.
+app.set('trust proxy', 1);
 
-// Increase the payload limit to allow Base64 image uploads safely
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
+app.use(helmet());
+app.use(compression());
 
-app.get('/', (req, res) => {
-  res.json({ message: "ABUAD SRC Portal API is running smoothly!" });
+// CORS locked to an explicit allowlist (was previously wide open).
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow same-origin / curl / mobile webviews (no Origin header)
+      if (!origin) return callback(null, true);
+      if (env.cors.origins.includes(origin)) return callback(null, true);
+      return callback(new Error(`Origin not allowed by CORS: ${origin}`));
+    },
+    credentials: true,
+  })
+);
+
+// Payloads are small now that images go to Supabase Storage
+// instead of being inlined as base64.
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+/** Health check — also the keep-alive target that stops Supabase/Render idling. */
+app.get('/health', async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: 'ok', db: 'connected', timestamp: new Date().toISOString() });
+  } catch {
+    res.status(503).json({ status: 'degraded', db: 'unreachable' });
+  }
 });
 
-// Mount API Routes middleware
-app.use('/api/feedback', feedbackRoutes);
-app.use('/api/auth', authRoutes); // Mount authentication endpoints
+app.get('/', (_req, res) => {
+  res.json({ name: 'ABUAD SRC Portal API', version: '2.0.0', status: 'running' });
+});
 
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => {
-    console.log('Successfully connected to MongoDB.');
-    app.listen(PORT, () => {
-      console.log(`Server is operating on port: ${PORT}`);
-    });
-  })
-  .catch((error) => {
-    console.error('Database connection failed:', error.message);
+app.use('/api', apiLimiter);
+app.use('/api/auth', authRoutes);
+app.use('/api/tickets', ticketRoutes);
+app.use('/api/departments', departmentRoutes);
+
+app.use(notFoundHandler);
+app.use(errorHandler);
+
+const server = app.listen(env.port, () => {
+  console.log(`[server] listening on port ${env.port} (${env.nodeEnv})`);
+});
+
+const shutdown = async (signal) => {
+  console.log(`\n[server] ${signal} received, shutting down...`);
+  server.close(async () => {
+    await prisma.$disconnect();
+    process.exit(0);
   });
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+export default app;

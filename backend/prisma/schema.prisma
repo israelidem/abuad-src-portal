@@ -1,0 +1,416 @@
+// ============================================================
+// ABUAD SRC Portal — Database Schema
+// Postgres (Supabase) + Prisma
+//
+// NOTE: `Profile.id` mirrors `auth.users.id` from Supabase Auth.
+// The foreign key to auth.users is added in a manual SQL migration
+// because Prisma does not manage the `auth` schema.
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")      // pooled (pgbouncer) — runtime
+  directUrl = env("DIRECT_URL")        // direct connection — migrations
+}
+
+// ------------------------------------------------------------
+// ENUMS
+// ------------------------------------------------------------
+
+enum UserRole {
+  STUDENT
+  REP
+  ADMIN
+}
+
+enum TicketStatus {
+  PENDING
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+  REOPENED
+}
+
+enum TicketCategory {
+  ACADEMIC
+  ICT
+  INFRASTRUCTURE
+  WELFARE
+  ADMINISTRATION
+  OTHER
+}
+
+enum Urgency {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum TicketEventType {
+  CREATED
+  STATUS_CHANGED
+  ASSIGNED
+  UNASSIGNED
+  COMMENTED
+  REOPENED
+  RATED
+  FLAGGED
+  UNFLAGGED
+  ATTACHMENT_ADDED
+  DUE_DATE_CHANGED
+}
+
+enum NotificationType {
+  TICKET_CREATED
+  STATUS_CHANGED
+  NEW_COMMENT
+  ASSIGNED
+  TICKET_RESOLVED
+  SLA_BREACH
+  ANNOUNCEMENT
+  POLL_OPENED
+}
+
+// ------------------------------------------------------------
+// USERS & ORGANISATION
+// ------------------------------------------------------------
+
+model Profile {
+  id                  String   @id @db.Uuid // = auth.users.id
+  email               String   @unique
+  fullName            String?  @map("full_name")
+  matricNumber        String?  @unique @map("matric_number")
+  faculty             String?
+  department          String?
+  avatarUrl           String?  @map("avatar_url")
+  role                UserRole @default(STUDENT)
+  isActive            Boolean  @default(true) @map("is_active")
+  emailVerifiedDomain Boolean  @default(false) @map("email_verified_domain")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  tickets           Ticket[]           @relation("TicketAuthor")
+  assignedTickets   Ticket[]           @relation("TicketAssignee")
+  comments          TicketComment[]
+  events            TicketEvent[]
+  votes             TicketVote[]
+  ratings           TicketRating[]
+  notifications     Notification[]
+  pushSubscriptions PushSubscription[]
+  announcements     Announcement[]
+  pollVotes         PollVote[]
+  savedViews        SavedView[]
+  auditLogs         AuditLog[]
+  settingsUpdates   AppSettings[]
+
+  @@index([role])
+  @@index([isActive])
+  @@map("profiles")
+}
+
+/// SRC offices that tickets are routed to (Welfare, ICT, Academic...)
+model Department {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  slug        String   @unique
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  tickets Ticket[]
+
+  @@map("departments")
+}
+
+// ------------------------------------------------------------
+// TICKETS
+// ------------------------------------------------------------
+
+model Ticket {
+  id           String         @id @default(uuid()) @db.Uuid
+  /// Human-readable ID, e.g. SRC-000142 — generated from a Postgres sequence
+  ticketNumber String         @unique @map("ticket_number")
+
+  /// Always populated, even for anonymous tickets (abuse prevention).
+  /// Identity is stripped at the API layer when `isAnonymous` is true.
+  authorId     String         @map("author_id") @db.Uuid
+  author       Profile        @relation("TicketAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  isAnonymous  Boolean        @default(false) @map("is_anonymous")
+
+  faculty      String
+  category     TicketCategory
+  description  String
+  urgency      Urgency        @default(MEDIUM)
+  status       TicketStatus   @default(PENDING)
+
+  locationText String         @map("location_text")
+  locationLat  Float?         @map("location_lat")
+  locationLng  Float?         @map("location_lng")
+
+  departmentId String?        @map("department_id") @db.Uuid
+  departmentRef Department?   @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  assignedToId String?        @map("assigned_to_id") @db.Uuid
+  assignedTo   Profile?       @relation("TicketAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  /// SLA target, derived from urgency on creation
+  dueAt        DateTime?      @map("due_at")
+  resolvedAt   DateTime?      @map("resolved_at")
+  closedAt     DateTime?      @map("closed_at")
+
+  /// Denormalised counters kept in sync by triggers (fast sorting)
+  upvoteCount  Int            @default(0) @map("upvote_count")
+  commentCount Int            @default(0) @map("comment_count")
+
+  isPublic     Boolean        @default(true) @map("is_public")
+  isFlagged    Boolean        @default(false) @map("is_flagged")
+  flagReason   String?        @map("flag_reason")
+
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  attachments TicketAttachment[]
+  comments    TicketComment[]
+  events      TicketEvent[]
+  votes       TicketVote[]
+  rating      TicketRating?
+
+  @@index([status])
+  @@index([category])
+  @@index([urgency])
+  @@index([authorId])
+  @@index([assignedToId])
+  @@index([departmentId])
+  @@index([createdAt])
+  @@index([upvoteCount])
+  @@index([dueAt])
+  @@index([isPublic, status])
+  @@map("tickets")
+}
+
+/// Images live in Supabase Storage — only paths are stored here.
+model TicketAttachment {
+  id          String   @id @default(uuid()) @db.Uuid
+  ticketId    String   @map("ticket_id") @db.Uuid
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  storagePath String   @map("storage_path")
+  thumbPath   String?  @map("thumb_path")
+  mimeType    String   @map("mime_type")
+  sizeBytes   Int      @map("size_bytes")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([ticketId])
+  @@map("ticket_attachments")
+}
+
+model TicketComment {
+  id         String   @id @default(uuid()) @db.Uuid
+  ticketId   String   @map("ticket_id") @db.Uuid
+  ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorId   String   @map("author_id") @db.Uuid
+  author     Profile  @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  body       String
+  /// Staff-only note — never serialised to students
+  isInternal Boolean  @default(false) @map("is_internal")
+  isEdited   Boolean  @default(false) @map("is_edited")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_comments")
+}
+
+/// Immutable audit timeline: "Pending → In Progress by Rep. Ada, 12 Mar"
+model TicketEvent {
+  id        String          @id @default(uuid()) @db.Uuid
+  ticketId  String          @map("ticket_id") @db.Uuid
+  ticket    Ticket          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  actorId   String?         @map("actor_id") @db.Uuid
+  actor     Profile?        @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  type      TicketEventType
+  fromValue String?         @map("from_value")
+  toValue   String?         @map("to_value")
+  metadata  Json?
+  createdAt DateTime        @default(now()) @map("created_at")
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_events")
+}
+
+/// "I'm affected too" — the unique constraint does the heavy lifting
+model TicketVote {
+  id        String   @id @default(uuid()) @db.Uuid
+  ticketId  String   @map("ticket_id") @db.Uuid
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  userId    String   @map("user_id") @db.Uuid
+  user      Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([ticketId, userId])
+  @@index([userId])
+  @@map("ticket_votes")
+}
+
+model TicketRating {
+  id        String   @id @default(uuid()) @db.Uuid
+  ticketId  String   @unique @map("ticket_id") @db.Uuid
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  userId    String   @map("user_id") @db.Uuid
+  user      Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  score     Int // 1..5 — CHECK constraint added in SQL migration
+  comment   String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("ticket_ratings")
+}
+
+// ------------------------------------------------------------
+// NOTIFICATIONS (in-app bell + Web Push)
+// ------------------------------------------------------------
+
+model Notification {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  user      Profile          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  body      String
+  /// Client-side route to open when clicked
+  link      String?
+  isRead    Boolean          @default(false) @map("is_read")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  @@index([userId, isRead, createdAt])
+  @@map("notifications")
+}
+
+/// Web Push (VAPID) subscriptions — one row per browser/device
+model PushSubscription {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  user      Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
+
+// ------------------------------------------------------------
+// ANNOUNCEMENTS & POLLS
+// ------------------------------------------------------------
+
+model Announcement {
+  id          String    @id @default(uuid()) @db.Uuid
+  authorId    String    @map("author_id") @db.Uuid
+  author      Profile   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  title       String
+  body        String
+  isPinned    Boolean   @default(false) @map("is_pinned")
+  publishedAt DateTime? @map("published_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  polls Poll[]
+
+  @@index([publishedAt])
+  @@map("announcements")
+}
+
+model Poll {
+  id             String        @id @default(uuid()) @db.Uuid
+  announcementId String?       @map("announcement_id") @db.Uuid
+  announcement   Announcement? @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  question       String
+  closesAt       DateTime?     @map("closes_at")
+  isActive       Boolean       @default(true) @map("is_active")
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  options PollOption[]
+  votes   PollVote[]
+
+  @@map("polls")
+}
+
+model PollOption {
+  id        String @id @default(uuid()) @db.Uuid
+  pollId    String @map("poll_id") @db.Uuid
+  poll      Poll   @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  label     String
+  voteCount Int    @default(0) @map("vote_count")
+  position  Int    @default(0)
+
+  votes PollVote[]
+
+  @@index([pollId])
+  @@map("poll_options")
+}
+
+model PollVote {
+  id        String     @id @default(uuid()) @db.Uuid
+  pollId    String     @map("poll_id") @db.Uuid
+  poll      Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  optionId  String     @map("option_id") @db.Uuid
+  option    PollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  userId    String     @map("user_id") @db.Uuid
+  user      Profile    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  @@unique([pollId, userId]) // one vote per poll per user
+  @@map("poll_votes")
+}
+
+// ------------------------------------------------------------
+// PREFERENCES, SETTINGS & AUDIT
+// ------------------------------------------------------------
+
+/// Saved filter combinations for the search overhaul
+model SavedView {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  user      Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  filters   Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("saved_views")
+}
+
+/// Single-row table (id is pinned to 1 by a CHECK constraint).
+/// Controls the signup email-domain policy, editable from the admin UI.
+model AppSettings {
+  id                    Int      @id @default(1)
+  restrictSignupDomains Boolean  @default(false) @map("restrict_signup_domains")
+  allowedDomains        String[] @default([]) @map("allowed_domains")
+  allowSubdomains       Boolean  @default(true) @map("allow_subdomains")
+  blockedDomains        String[] @default([]) @map("blocked_domains")
+  updatedById           String?  @map("updated_by_id") @db.Uuid
+  updatedBy             Profile? @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@map("app_settings")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @map("actor_id") @db.Uuid
+  actor      Profile? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id")
+  metadata   Json?
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([actorId, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
