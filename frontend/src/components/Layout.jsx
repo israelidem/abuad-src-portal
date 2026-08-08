@@ -5,11 +5,12 @@
  * matching routes are guarded and the API re-checks on every request.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   ListChecks,
+  Megaphone,
   PlusCircle,
   Shield,
   User,
@@ -18,12 +19,17 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
+import { adminApi } from '../lib/api.js';
+import Logo from './Logo.jsx';
+import NotificationBell from './NotificationBell.jsx';
+import ThemeToggle from './ThemeToggle.jsx';
 
 const FOREST_GREEN = '#006633';
 
 const NAV = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, access: 'auth' },
   { to: '/tickets', label: 'Issues', icon: ListChecks, access: 'public' },
+  { to: '/announcements', label: 'News', icon: Megaphone, access: 'public' },
   { to: '/tickets/new', label: 'Report', icon: PlusCircle, access: 'auth' },
   { to: '/admin', label: 'Admin', icon: Shield, access: 'staff' },
 ];
@@ -32,6 +38,22 @@ export default function Layout() {
   const { isAuthenticated, isStaff, profile, signOut } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [maintenance, setMaintenance] = useState(null);
+
+  // Public endpoint, so the banner also shows on the sign-in page — which
+  // is exactly where someone who can't submit will end up looking.
+  useEffect(() => {
+    const controller = new AbortController();
+
+    adminApi
+      .maintenance({ signal: controller.signal })
+      .then((data) => setMaintenance(data.maintenanceMode ? data : null))
+      .catch(() => {
+        // A failed check must not block the app; assume normal operation.
+      });
+
+    return () => controller.abort();
+  }, []);
 
   const visible = NAV.filter((item) => {
     if (item.access === 'public') return true;
@@ -51,7 +73,7 @@ export default function Layout() {
     }`;
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-50">
+    <div className="flex min-h-screen flex-col bg-slate-50 dark:bg-slate-950">
       {/* Keyboard users can jump straight to content */}
       <a
         href="#main"
@@ -63,9 +85,7 @@ export default function Layout() {
       <header style={{ backgroundColor: FOREST_GREEN }} className="sticky top-0 z-40 shadow-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <Link to="/" className="flex items-center gap-2 text-white">
-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-[#FAF92A] font-bold text-[#006633]">
-              SRC
-            </span>
+            <Logo size="sm" />
             <span className="hidden font-semibold sm:block">ABUAD SRC Portal</span>
           </Link>
 
@@ -79,8 +99,13 @@ export default function Layout() {
           </nav>
 
           <div className="hidden items-center gap-2 md:flex">
+            <ThemeToggle />
+
             {isAuthenticated ? (
               <>
+                {/* Signed-in only — the endpoint is per-user and 401s
+                    without a session. */}
+                <NotificationBell />
                 <Link
                   to="/profile"
                   className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-white/75 hover:bg-white/10 hover:text-white"
@@ -144,6 +169,10 @@ export default function Layout() {
                 </NavLink>
               ))}
 
+              <div className="mt-2 flex justify-center border-t border-white/10 pt-3">
+                <ThemeToggle />
+              </div>
+
               <div className="mt-2 border-t border-white/10 pt-2">
                 {isAuthenticated ? (
                   <>
@@ -179,12 +208,22 @@ export default function Layout() {
         )}
       </header>
 
+      {maintenance && (
+        <div
+          role="status"
+          className="border-b border-amber-300 bg-amber-100 px-4 py-2 text-center text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+        >
+          {maintenance.maintenanceMessage ||
+            'The portal is in maintenance mode. You can browse, but new reports and comments are paused.'}
+        </div>
+      )}
+
       <main id="main" className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">
         <Outlet />
       </main>
 
-      <footer className="border-t border-slate-200 bg-white">
-        <div className="mx-auto max-w-7xl px-4 py-6 text-center text-sm text-slate-500">
+      <footer className="border-t border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <div className="mx-auto max-w-7xl px-4 py-6 text-center text-sm text-slate-500 dark:text-slate-400">
           <p>Afe Babalola University Students&apos; Representative Council</p>
           <p className="mt-1">
             Need help? Email{' '}

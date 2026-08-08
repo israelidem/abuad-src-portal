@@ -14,6 +14,7 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAuth, optionalAuth, requireStaff, requireAdmin } from '../middleware/auth.js';
 import { createTicketLimiter, interactionLimiter } from '../middleware/rateLimiter.js';
 import { validateBody, validateQuery, validateParams } from '../middleware/validate.js';
+import { notify } from '../services/pushService.js';
 import {
   createTicketSchema,
   updateTicketSchema,
@@ -24,12 +25,15 @@ import {
   updateCommentSchema,
   listTicketsQuerySchema,
   ticketIdParamSchema,
+  createRatingSchema,
+  reopenTicketSchema,
 } from '../validators/ticketSchemas.js';
 import {
   calculateDueDate,
   assertValidTransition,
   canEditTicket,
   canDeleteTicket,
+  isStaffUser,
   ticketInclude,
   authorSelect,
   serialiseTicket,
@@ -42,6 +46,18 @@ import {
 } from '../services/ticketService.js';
 
 const router = express.Router();
+
+/**
+ * Human-readable status names for notification copy. The enum values are
+ * fine in JSON but "IN_PROGRESS" reads badly on a lock screen.
+ */
+const STATUS_LABELS = {
+  PENDING: 'Pending',
+  IN_PROGRESS: 'In Progress',
+  RESOLVED: 'Resolved',
+  CLOSED: 'Closed',
+  REOPENED: 'Reopened',
+};
 
 /**
  * GET /api/tickets
@@ -247,6 +263,18 @@ router.patch(
       data.dueAt = calculateDueDate(data.urgency, ticket.createdAt);
     }
 
+    // Routing is a staff decision. Students editing their own ticket must
+    // not be able to send it to a department of their choosing.
+    if ('departmentId' in data) {
+      if (!isStaffUser(req.user)) {
+        throw new ApiError(403, 'Only SRC staff can route a ticket to a department.');
+      }
+      if (data.departmentId) {
+        const dept = await prisma.department.findUnique({ where: { id: data.departmentId } });
+        if (!dept || !dept.isActive) throw new ApiError(400, 'That department is not available.');
+      }
+    }
+
     const updated = await prisma.ticket.update({
       where: { id: ticket.id },
       data,
@@ -265,7 +293,7 @@ router.patch(
   validateParams(ticketIdParamSchema),
   validateBody(updateTicketStatusSchema),
   asyncHandler(async (req, res) => {
-    const { status, note } = req.body;
+    const { status, note, departmentId } = req.body;
     const ticket = await getTicketOrThrow(req.params.id, req.user);
 
     assertValidTransition(ticket.status, status);
@@ -276,6 +304,20 @@ router.patch(
     if (status === 'REOPENED') {
       data.resolvedAt = null;
       data.closedAt = null;
+    }
+
+    // Re-routing can accompany a status change. Both land in one
+    // transaction so a failure can't leave the status moved but the
+    // department stale.
+    const reroute = departmentId !== undefined && departmentId !== ticket.departmentId;
+    let toDepartmentName = null;
+    if (reroute) {
+      if (departmentId) {
+        const dept = await prisma.department.findUnique({ where: { id: departmentId } });
+        if (!dept || !dept.isActive) throw new ApiError(400, 'That department is not available.');
+        toDepartmentName = dept.name;
+      }
+      data.departmentId = departmentId;
     }
 
     const updated = await prisma.$transaction(async (tx) => {
@@ -294,6 +336,23 @@ router.patch(
         metadata: note ? { note } : undefined,
       });
 
+      // A reroute is its own fact. Folding it into the status event would
+      // lose it entirely when the status didn't change, and the reporter
+      // would see a ticket sitting with a new office and no explanation.
+      if (reroute) {
+        await recordEvent(tx, {
+          ticketId: ticket.id,
+          actorId: req.user.id,
+          type: 'DEPARTMENT_CHANGED',
+          from: ticket.departmentId,
+          to: departmentId,
+          // from/to hold UUIDs, which mean nothing to a student reading
+          // the timeline. The name is denormalised here so the entry stays
+          // readable even if the department is later renamed or deleted.
+          metadata: { toName: toDepartmentName ?? 'Unassigned' },
+        });
+      }
+
       if (note) {
         await tx.ticketComment.create({
           data: { ticketId: ticket.id, authorId: req.user.id, body: note },
@@ -302,6 +361,21 @@ router.patch(
 
       return result;
     });
+
+    // After commit — a notification for a rolled-back change would be a
+    // lie, and the author doesn't need telling about their own action.
+    if (ticket.authorId !== req.user.id) {
+      const label = STATUS_LABELS[status] ?? status;
+      await notify(ticket.authorId, {
+        type: status === 'RESOLVED' ? 'TICKET_RESOLVED' : 'STATUS_CHANGED',
+        title: `${ticket.ticketNumber} is now ${label}`,
+        body: note ?? `Your report was moved to ${label}.`,
+        link: `/tickets/${ticket.id}`,
+        // One tag per ticket, so five updates collapse into one entry
+        // rather than burying the phone in notifications.
+        tag: `ticket-${ticket.id}`,
+      });
+    }
 
     res.json({ ticket: serialiseTicket(updated, req.user) });
   })
@@ -344,6 +418,18 @@ router.patch(
 
       return result;
     });
+
+    // Tell the rep they've picked up work — they aren't watching the
+    // board waiting for a ticket to land on them.
+    if (assignedToId && assignedToId !== req.user.id) {
+      await notify(assignedToId, {
+        type: 'ASSIGNED',
+        title: `${ticket.ticketNumber} assigned to you`,
+        body: ticket.description.slice(0, 120),
+        link: `/tickets/${ticket.id}`,
+        tag: `ticket-${ticket.id}`,
+      });
+    }
 
     res.json({ ticket: serialiseTicket(updated, req.user) });
   })
@@ -453,7 +539,7 @@ router.get(
       include: { author: { select: { id: true } } },
     });
 
-    const staff = viewer?.role === 'REP' || viewer?.role === 'ADMIN';
+    const staff = isStaffUser(viewer);
 
     const comments = await prisma.ticketComment.findMany({
       where: {
@@ -485,7 +571,7 @@ router.post(
     }
 
     // isInternal is staff-only regardless of what the client sends
-    const staff = req.user.role === 'REP' || req.user.role === 'ADMIN';
+    const staff = isStaffUser(req.user);
     const isInternal = staff && req.body.isInternal === true;
 
     const comment = await prisma.$transaction(async (tx) => {
@@ -510,6 +596,25 @@ router.post(
 
       return created;
     });
+
+    // Internal notes are staff-only, so notifying the student about one
+    // would leak both its existence and its contents.
+    if (!isInternal) {
+      // Staff replying notifies the reporter; the reporter replying
+      // notifies whoever is handling it. Nobody hears about their own
+      // comment.
+      const recipientId = req.user.id === ticket.authorId ? ticket.assignedToId : ticket.authorId;
+
+      if (recipientId && recipientId !== req.user.id) {
+        await notify(recipientId, {
+          type: 'NEW_COMMENT',
+          title: `New comment on ${ticket.ticketNumber}`,
+          body: req.body.body.slice(0, 120),
+          link: `/tickets/${ticket.id}`,
+          tag: `ticket-${ticket.id}`,
+        });
+      }
+    }
 
     res.status(201).json({ comment: serialiseComment(comment, req.user) });
   })
@@ -556,7 +661,7 @@ router.delete(
       throw new ApiError(404, 'Comment not found.');
     }
 
-    const staff = req.user.role === 'REP' || req.user.role === 'ADMIN';
+    const staff = isStaffUser(req.user);
     if (comment.authorId !== req.user.id && !staff) {
       throw new ApiError(403, 'You can only delete your own comments.');
     }
@@ -564,6 +669,178 @@ router.delete(
     await prisma.ticketComment.delete({ where: { id: comment.id } });
 
     res.json({ message: 'Comment deleted.' });
+  })
+);
+
+// ------------------------------------------------------------
+// Satisfaction rating & reopen (Phase 4b)
+// ------------------------------------------------------------
+
+/**
+ * POST /api/tickets/:id/rating
+ *
+ * Only the reporter rates, and only once a ticket is actually resolved —
+ * rating an open ticket would measure impatience, not service. The unique
+ * constraint on ticket_id makes the "once" part real.
+ */
+router.post(
+  '/:id/rating',
+  requireAuth,
+  interactionLimiter,
+  validateParams(ticketIdParamSchema),
+  validateBody(createRatingSchema),
+  asyncHandler(async (req, res) => {
+    const ticket = await getTicketOrThrow(req.params.id);
+
+    if (ticket.authorId !== req.user.id) {
+      throw new ApiError(403, 'Only the person who reported this can rate it.');
+    }
+
+    if (!['RESOLVED', 'CLOSED'].includes(ticket.status)) {
+      throw new ApiError(409, 'You can rate this once it has been resolved.');
+    }
+
+    const existing = await prisma.ticketRating.findUnique({
+      where: { ticketId: ticket.id },
+    });
+    if (existing) throw new ApiError(409, 'You have already rated this report.');
+
+    const rating = await prisma.$transaction(async (tx) => {
+      const created = await tx.ticketRating.create({
+        data: {
+          ticketId: ticket.id,
+          userId: req.user.id,
+          score: req.body.score,
+          comment: req.body.comment ?? null,
+        },
+      });
+
+      await recordEvent(tx, {
+        ticketId: ticket.id,
+        actorId: req.user.id,
+        type: 'RATED',
+        to: String(req.body.score),
+      });
+
+      return created;
+    });
+
+    // Tell whoever handled it. Praise is as useful as complaint, and
+    // silence after a fix is what makes reps stop caring.
+    if (ticket.assignedToId) {
+      await notify(ticket.assignedToId, {
+        type: 'TICKET_RESOLVED',
+        title: `${req.body.score}★ rating on ${ticket.ticketNumber}`,
+        body: req.body.comment || 'The reporter rated your resolution.',
+        link: `/tickets/${ticket.id}`,
+      }).catch(() => {});
+    }
+
+    res.status(201).json({ rating });
+  })
+);
+
+/**
+ * PATCH /api/tickets/:id/reopen
+ *
+ * The reporter's escape hatch for "marked resolved, still broken" —
+ * without it their only option is filing a duplicate, which loses the
+ * history and inflates the numbers.
+ */
+router.patch(
+  '/:id/reopen',
+  requireAuth,
+  interactionLimiter,
+  validateParams(ticketIdParamSchema),
+  validateBody(reopenTicketSchema),
+  asyncHandler(async (req, res) => {
+    const ticket = await getTicketOrThrow(req.params.id);
+
+    const isOwner = ticket.authorId === req.user.id;
+    if (!isOwner && !isStaffUser(req.user)) {
+      throw new ApiError(403, 'Only the reporter or SRC staff can reopen this.');
+    }
+
+    if (!['RESOLVED', 'CLOSED'].includes(ticket.status)) {
+      throw new ApiError(409, 'This report is already open.');
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const t = await tx.ticket.update({
+        where: { id: ticket.id },
+        data: {
+          status: 'REOPENED',
+          // Cleared so the ticket doesn't still look resolved in
+          // analytics, and so resolution time is measured from the
+          // real fix rather than the premature one.
+          resolvedAt: null,
+          closedAt: null,
+        },
+        include: ticketInclude,
+      });
+
+      await recordEvent(tx, {
+        ticketId: ticket.id,
+        actorId: req.user.id,
+        type: 'REOPENED',
+        from: ticket.status,
+        to: 'REOPENED',
+        metadata: { reason: req.body.reason },
+      });
+
+      return t;
+    });
+
+    // Notify the assignee, or nobody will know it bounced back.
+    if (ticket.assignedToId && ticket.assignedToId !== req.user.id) {
+      await notify(ticket.assignedToId, {
+        type: 'STATUS_CHANGED',
+        title: `${ticket.ticketNumber} was reopened`,
+        body: req.body.reason,
+        link: `/tickets/${ticket.id}`,
+      }).catch(() => {});
+    }
+
+    res.json({ ticket: serialiseTicket(updated, req.user) });
+  })
+);
+
+/**
+ * GET /api/tickets/track/:ticketNumber — no auth.
+ *
+ * Lets a student check progress from a shared ticket number without an
+ * account. Deliberately minimal: status and timestamps only, no
+ * description, no comments, no author. The ticket number is guessable
+ * (SRC-000142), so anything returned here is effectively public.
+ */
+router.get(
+  '/track/:ticketNumber',
+  asyncHandler(async (req, res) => {
+    const ticketNumber = String(req.params.ticketNumber || '').trim().toUpperCase();
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { ticketNumber },
+      select: {
+        ticketNumber: true,
+        status: true,
+        category: true,
+        urgency: true,
+        createdAt: true,
+        updatedAt: true,
+        resolvedAt: true,
+        isPublic: true,
+        departmentRef: { select: { name: true } },
+      },
+    });
+
+    // Same response either way: a 404 that differs from "private" would
+    // confirm the ticket exists to anyone enumerating numbers.
+    if (!ticket || !ticket.isPublic) {
+      throw new ApiError(404, 'No public report found with that number.');
+    }
+
+    const { isPublic: _isPublic, departmentRef, ...rest } = ticket;
+    res.json({ ticket: { ...rest, department: departmentRef?.name ?? null } });
   })
 );
 

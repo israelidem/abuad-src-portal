@@ -33,6 +33,18 @@ const cases = [
   { path: '/health', expect: [200, 503], note: 'health route mounted (503 = no DB, fine)' },
   { path: '/api/auth/me', expect: [401], note: 'protected route mounted, not 404' },
   { path: '/api/auth/nope', expect: [404], note: 'unknown route still 404s' },
+  {
+    path: '/api/notifications',
+    expect: [401],
+    note: 'notification routes mounted, auth enforced',
+  },
+  {
+    // Public by design, and reachable with no VAPID keys configured —
+    // it reports enabled:false rather than erroring.
+    path: '/api/notifications/vapid-public-key',
+    expect: [200],
+    note: 'vapid key endpoint public and degrades without keys',
+  },
 ];
 
 let failures = 0;

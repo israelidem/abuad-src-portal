@@ -1,0 +1,83 @@
+# Keeps the Render free-tier API from idling.
+#
+# Render spins a free service down after ~15 minutes without traffic, and
+# the cold start that follows takes the better part of a minute. A student
+# tapping "sign in" during that window sees a hang that looks like a broken
+# portal, so we poke /health often enough that it never gets there.
+#
+# This file MUST live at the repository root under .github/workflows/.
+# GitHub only reads workflows from that path — a copy under backend/ is
+# never executed, which is the state this repo was in.
+#
+# Two caveats worth knowing:
+#   * Cron here is best-effort. GitHub queues scheduled jobs and drops them
+#     under load, so treat this as "usually every 10 minutes", not a
+#     guarantee. The 14-minute idle window gives that slack room.
+#   * GitHub disables scheduled workflows in repos with no commits for 60
+#     days. If the API starts sleeping again months from now, re-enable it
+#     from the Actions tab before assuming something broke.
+
+name: Keep API awake
+
+on:
+  schedule:
+    # Every 10 minutes — comfortably inside Render's ~15 minute idle timer
+    # even when a run or two gets skipped.
+    - cron: '*/10 * * * *'
+
+  # Lets you confirm it works from the Actions tab without waiting.
+  workflow_dispatch:
+
+# If a slow cold start overruns into the next tick, let the in-flight run
+# finish rather than piling requests onto a waking server.
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Ping /health
+        env:
+          # Set this as a repository variable (Settings → Secrets and
+          # variables → Actions → Variables) if the API ever moves. Not a
+          # secret: it's a public URL, and a secret would be masked in the
+          # logs precisely when you need to read it.
+          API_URL: ${{ vars.API_URL || 'https://abuad-src-portal-backend.onrender.com' }}
+        run: |
+          set -uo pipefail
+
+          # --max-time 90 covers a full cold start; the retry flags handle
+          # the connection being refused while the container boots.
+          status=$(curl \
+            --silent \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            --location \
+            --max-time 90 \
+            --retry 3 \
+            --retry-delay 15 \
+            --retry-connrefused \
+            "$API_URL/health") || status=000
+
+          echo "GET $API_URL/health -> $status"
+
+          # The point of this job is "is the process awake", not "is every
+          # dependency healthy". /health returns 503 when Postgres is
+          # unreachable, and failing on that would email a red X for a
+          # database blip the ping can do nothing about. Any HTTP response
+          # means Express answered, which is the thing we came to check.
+          if [ "$status" = "000" ]; then
+            echo "::error::No HTTP response — the API is unreachable, not merely asleep."
+            exit 1
+          fi
+
+          if [ "$status" != "200" ]; then
+            echo "::warning::API is awake but /health returned $status (likely the database)."
+          fi

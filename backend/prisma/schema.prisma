@@ -25,6 +25,12 @@ enum UserRole {
   STUDENT
   REP
   ADMIN
+  /// The "absolute admin". Outranks ADMIN and is deliberately hard to
+  /// remove: a SUPER_ADMIN can only be demoted or deactivated by another
+  /// SUPER_ADMIN, and the last one standing cannot be demoted at all.
+  /// Without that floor, two admins could lock each other out and leave
+  /// the portal with nobody able to restore access.
+  SUPER_ADMIN
 }
 
 enum TicketStatus {
@@ -62,6 +68,10 @@ enum TicketEventType {
   UNFLAGGED
   ATTACHMENT_ADDED
   DUE_DATE_CHANGED
+  /// Staff re-routed the ticket to a different department. Without this
+  /// the reroute happened silently — the ticket moved office and the
+  /// timeline gave the reporter no explanation for the delay.
+  DEPARTMENT_CHANGED
 }
 
 enum NotificationType {
@@ -392,6 +402,14 @@ model AppSettings {
   allowedDomains        String[] @default([]) @map("allowed_domains")
   allowSubdomains       Boolean  @default(true) @map("allow_subdomains")
   blockedDomains        String[] @default([]) @map("blocked_domains")
+
+  /// Maintenance mode. When on, students get a 503 with `maintenanceMode:
+  /// true` on every write; staff keep working so they can finish or verify
+  /// whatever the maintenance is for. Reads stay open — a read-only portal
+  /// is far more useful during a migration than a wall.
+  maintenanceMode       Boolean  @default(false) @map("maintenance_mode")
+  maintenanceMessage    String?  @map("maintenance_message")
+
   updatedById           String?  @map("updated_by_id") @db.Uuid
   updatedBy             Profile? @relation(fields: [updatedById], references: [id], onDelete: SetNull)
   updatedAt             DateTime @updatedAt @map("updated_at")

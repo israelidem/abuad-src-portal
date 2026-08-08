@@ -2,9 +2,53 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <title>ABUAD SRC Portal</title>
+    <meta
+      name="description"
+      content="Report campus issues to the Afe Babalola University Students' Representative Council and track how they're resolved."
+    />
+
+    <!-- Address bar matches the header green -->
+    <meta name="theme-color" content="#006633" />
+
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- iOS ignores the manifest's display mode; these are its equivalent -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="ABUAD SRC" />
+
+    <meta property="og:title" content="ABUAD SRC Portal" />
+    <meta
+      property="og:description"
+      content="Report campus issues and track how the SRC resolves them."
+    />
+    <meta property="og:type" content="website" />
+
+    <!--
+      Applies the saved theme before the first paint. React mounts too late
+      to prevent the white flash that dark-mode users would otherwise see
+      on every page load. Kept inline and dependency-free for that reason.
+    -->
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem('abuad-theme') || 'system';
+          var dark =
+            saved === 'dark' ||
+            (saved === 'system' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.classList.add('dark');
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+        } catch (e) {
+          /* localStorage blocked — light theme is a fine default */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

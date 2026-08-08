@@ -54,6 +54,18 @@ export function RequireAdmin() {
   return <Outlet />;
 }
 
+/** Requires SUPER_ADMIN — portal-wide settings and maintenance mode. */
+export function RequireSuperAdmin() {
+  const { isAuthenticated, isSuperAdmin, resolving } = useAuth();
+  const location = useLocation();
+
+  if (resolving) return <FullPageSpinner label="Checking your permissions…" />;
+  if (!isAuthenticated) return <Navigate to="/login" state={{ from: location }} replace />;
+  if (!isSuperAdmin) return <Navigate to="/403" replace />;
+
+  return <Outlet />;
+}
+
 /** Keeps signed-in users away from /login and /signup. */
 export function RedirectIfAuthenticated({ children }) {
   const { isAuthenticated, resolving } = useAuth();

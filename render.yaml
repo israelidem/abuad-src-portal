@@ -52,5 +52,31 @@ services:
       # --- CORS ---
       # Comma-separated. Must include the exact Vercel origin, no trailing
       # slash, or the browser blocks every request once the API is up.
+      # Surrounding spaces are trimmed by config/env.js, so
+      # "a.com, b.com" is fine.
       - key: ALLOWED_ORIGINS
+        sync: false
+
+      # --- Database (migrations) ---
+      # Session-mode pooler, port 5432. Prisma needs this for `migrate`,
+      # which the transaction pooler on 6543 cannot serve.
+      - key: DIRECT_URL
+        sync: false
+
+      # --- Web Push (VAPID) ---
+      # Generate once with `npx web-push generate-vapid-keys` and keep the
+      # pair stable: regenerating invalidates every existing browser
+      # subscription, and those devices go quiet with no error anywhere.
+      #
+      # Both are sync: false. The public key is not secret — the browser
+      # fetches it from /api/notifications/vapid-public-key — but it lives
+      # next to the private key here so the pair can't drift apart.
+      #
+      # Omit them and push simply stays off; pushService degrades to a
+      # no-op instead of crashing the API.
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
         sync: false

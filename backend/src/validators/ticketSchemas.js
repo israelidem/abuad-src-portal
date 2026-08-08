@@ -88,7 +88,15 @@ export const createTicketSchema = z.object({
     .optional(),
 });
 
-/** Students may correct details, but only while the ticket is still PENDING. */
+/**
+ * Students may correct details, but only while the ticket is still PENDING.
+ *
+ * `departmentId` is here because staff re-route tickets through this same
+ * endpoint. Zod strips unknown keys, so omitting it didn't reject the
+ * request — it silently emptied the body, which then failed the
+ * "no changes supplied" guard below with an unhelpful `Validation failed.`
+ * The route re-checks that only staff may set it.
+ */
 export const updateTicketSchema = z
   .object({
     description: z.string().trim().min(20).max(5000).optional(),
@@ -96,16 +104,29 @@ export const updateTicketSchema = z
     locationText: z.string().trim().min(2).max(255).optional(),
     category: z.enum(TICKET_CATEGORIES).optional(),
     isPublic: z.boolean().optional(),
+    isAnonymous: z.boolean().optional(),
+
+    /// null clears the routing
+    departmentId: uuid.nullable().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: 'No changes supplied.',
   });
 
-/** Staff-only workflow transitions. */
+/**
+ * Staff-only workflow transitions.
+ *
+ * `departmentId` rides along so "change status and re-route" is a single
+ * atomic request. Sending them separately meant a failure on the second
+ * left the first already applied — the ticket moved but the UI reported
+ * an error and rolled its own select back, so screen and database
+ * disagreed.
+ */
 export const updateTicketStatusSchema = z.object({
   status: z.enum(TICKET_STATUSES),
   /// Surfaced on the public timeline, so it's optional but encouraged.
   note: z.string().trim().max(1000).optional(),
+  departmentId: uuid.nullable().optional(),
 });
 
 export const assignTicketSchema = z.object({
@@ -170,4 +191,21 @@ export const listTicketsQuerySchema = z.object({
     .union([z.boolean(), z.string()])
     .transform((v) => v === true || v === 'true')
     .default(false),
+});
+
+/**
+ * Satisfaction rating. The 1–5 bound is enforced here and again by a
+ * CHECK constraint in SQL — the API is not the only path into the table.
+ */
+export const createRatingSchema = z.object({
+  score: z.coerce.number().int().min(1).max(5),
+  comment: z.string().trim().max(500).optional(),
+});
+
+/**
+ * Reopening requires a reason. Without one, staff get a ticket back on
+ * their queue with no idea what is still broken.
+ */
+export const reopenTicketSchema = z.object({
+  reason: z.string().trim().min(5, 'Tell us what is still wrong.').max(500),
 });

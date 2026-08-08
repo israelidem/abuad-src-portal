@@ -8,20 +8,22 @@
  * memory otherwise.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Upload, X, ImageIcon } from 'lucide-react';
 import { MAX_FILES, validateFile, formatBytes } from '../lib/uploads.js';
 
 export default function AttachmentPicker({ files, onChange, disabled }) {
   const inputRef = useRef(null);
-  const [previews, setPreviews] = useState([]);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    const urls = files.map((file) => URL.createObjectURL(file));
-    setPreviews(urls);
-    return () => urls.forEach(URL.revokeObjectURL);
-  }, [files]);
+  // Derived from `files` rather than mirrored into state — an effect that
+  // setStates on every prop change costs an extra render pass for a value
+  // that's a pure function of the input.
+  const previews = useMemo(() => files.map((file) => URL.createObjectURL(file)), [files]);
+
+  // Object URLs are held by the browser until revoked, so release the
+  // previous batch whenever it's replaced and on unmount.
+  useEffect(() => () => previews.forEach(URL.revokeObjectURL), [previews]);
 
   const handleSelect = (event) => {
     setError('');

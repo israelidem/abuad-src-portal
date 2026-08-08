@@ -21,10 +21,16 @@ const SELECTS = [
 export default function TicketFilters({ params, onChange, onReset }) {
   const [search, setSearch] = useState(params.q ?? '');
 
-  // Keep the box in sync when filters are cleared elsewhere
-  useEffect(() => {
-    setSearch(params.q ?? '');
-  }, [params.q]);
+  // Keep the box in sync when filters are cleared elsewhere. Done during
+  // render rather than in an effect so the input never shows a stale value
+  // for a frame after a reset.
+  const incomingQuery = params.q ?? '';
+  const [syncedQuery, setSyncedQuery] = useState(incomingQuery);
+
+  if (syncedQuery !== incomingQuery) {
+    setSyncedQuery(incomingQuery);
+    setSearch(incomingQuery);
+  }
 
   useEffect(() => {
     if (search === (params.q ?? '')) return;

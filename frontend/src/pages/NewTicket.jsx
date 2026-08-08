@@ -20,6 +20,39 @@ import { Spinner } from '../components/Spinner.jsx';
 
 const MIN_DESCRIPTION = 20;
 
+/**
+ * Privacy presets.
+ *
+ * The API still stores two independent booleans; this collapses them into
+ * one decision the reporter can actually reason about. Keeping the mapping
+ * in one table means the form never has to derive it inline.
+ */
+const PRIVACY_OPTIONS = [
+  {
+    value: 'PUBLIC_NAMED',
+    label: 'Public board, with my name',
+    hint: 'Other students can see and upvote it, and can see it came from you.',
+    isPublic: true,
+    isAnonymous: false,
+  },
+  {
+    value: 'PUBLIC_ANONYMOUS',
+    label: 'Public board, anonymously',
+    hint: 'Others can see and upvote it, but your name is hidden — including from SRC staff. Administrators can still trace serious abuse.',
+    isPublic: true,
+    isAnonymous: true,
+  },
+  {
+    value: 'PRIVATE',
+    label: 'SRC staff only',
+    hint: "Kept off the public board. Staff will see your name so they can follow up, but other students won't see the report at all.",
+    isPublic: false,
+    isAnonymous: false,
+  },
+];
+
+const DEFAULT_PRIVACY = 'PUBLIC_NAMED';
+
 export default function NewTicket() {
   const { profile, user } = useAuth();
   const navigate = useNavigate();
@@ -39,8 +72,7 @@ export default function NewTicket() {
     urgency: 'MEDIUM',
     locationText: '',
     departmentId: '',
-    isAnonymous: false,
-    isPublic: true,
+    privacy: DEFAULT_PRIVACY,
   });
 
   useEffect(() => {
@@ -80,10 +112,18 @@ export default function NewTicket() {
       }
 
       setStage('Submitting your report…');
+
+      // Expand the single choice back into the two flags the API stores
+      const { privacy, ...fields } = form;
+      const preset =
+        PRIVACY_OPTIONS.find((o) => o.value === privacy) ?? PRIVACY_OPTIONS[0];
+
       const { ticket } = await ticketApi.create({
-        ...form,
+        ...fields,
         departmentId: form.departmentId || undefined,
         locationText: form.locationText || undefined,
+        isPublic: preset.isPublic,
+        isAnonymous: preset.isAnonymous,
         attachments: uploaded,
       });
 
@@ -93,7 +133,7 @@ export default function NewTicket() {
       // Don't strand the uploads if the ticket never got created
       await Promise.all(uploaded.map((a) => removeAttachment(a.storagePath)));
 
-      setError(err.message);
+      setError(err.displayMessage ?? err.message);
       setFieldErrors(err.fieldErrors ?? {});
     } finally {
       setSubmitting(false);
@@ -266,39 +306,45 @@ export default function NewTicket() {
 
         <AttachmentPicker files={files} onChange={setFiles} disabled={submitting} />
 
-        <fieldset className="space-y-3 rounded-lg bg-slate-50 p-4">
-          <legend className="px-1 text-sm font-medium text-slate-700">Privacy</legend>
+        {/*
+          One choice instead of two checkboxes.
 
-          <label className="flex cursor-pointer items-start gap-3">
-            <input
-              type="checkbox"
-              checked={form.isAnonymous}
-              onChange={update('isAnonymous')}
-              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#006633] focus:ring-[#006633]"
-            />
-            <span className="text-sm">
-              <span className="font-medium text-slate-800">Report anonymously</span>
-              <span className="mt-0.5 block text-xs text-slate-500">
-                Your name won&apos;t be shown to anyone, including SRC staff. Administrators can
-                still trace serious abuse.
-              </span>
-            </span>
-          </label>
+          Two independent boxes produced four states, and the two that
+          mattered ("public but unnamed", "named but private") were the
+          least obvious to reach. A single list makes the visibility and
+          the naming consequence of each option explicit.
+        */}
+        <fieldset className="space-y-2 rounded-lg bg-slate-50 p-4">
+          <legend className="px-1 text-sm font-medium text-slate-700">
+            Who can see this report?
+          </legend>
 
-          <label className="flex cursor-pointer items-start gap-3">
-            <input
-              type="checkbox"
-              checked={form.isPublic}
-              onChange={update('isPublic')}
-              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#006633] focus:ring-[#006633]"
-            />
-            <span className="text-sm">
-              <span className="font-medium text-slate-800">Show on the public board</span>
-              <span className="mt-0.5 block text-xs text-slate-500">
-                Other students can upvote it, which helps the SRC prioritise.
-              </span>
-            </span>
-          </label>
+          {PRIVACY_OPTIONS.map((option) => {
+            const selected = form.privacy === option.value;
+            return (
+              <label
+                key={option.value}
+                className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
+                  selected
+                    ? 'border-[#006633] bg-[#006633]/[0.06]'
+                    : 'border-slate-200 bg-white hover:border-slate-300'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="privacy"
+                  value={option.value}
+                  checked={selected}
+                  onChange={() => setForm((prev) => ({ ...prev, privacy: option.value }))}
+                  className="mt-0.5 h-4 w-4 border-slate-300 text-[#006633] focus:ring-[#006633]"
+                />
+                <span className="text-sm">
+                  <span className="font-medium text-slate-800">{option.label}</span>
+                  <span className="mt-0.5 block text-xs text-slate-500">{option.hint}</span>
+                </span>
+              </label>
+            );
+          })}
         </fieldset>
 
         <div className="flex items-center justify-end gap-3 border-t border-slate-100 pt-4">

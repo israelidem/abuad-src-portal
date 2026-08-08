@@ -121,6 +121,27 @@ Dashboard → `abuad-src-portal-backend` → **Environment** → add each:
 | `SUPABASE_SERVICE_ROLE_KEY` | service_role key |
 | `DATABASE_URL` | pooled string, port 6543 |
 | `ALLOWED_ORIGINS` | `https://abuad-src-portal.vercel.app` |
+| `VAPID_PUBLIC_KEY` | optional — see *Push notifications* below |
+| `VAPID_PRIVATE_KEY` | optional — see *Push notifications* below |
+| `VAPID_SUBJECT` | optional — `mailto:src@abuad.edu.ng` |
+
+### Push notifications (optional)
+
+Leave the three `VAPID_*` vars unset and push simply stays off: the API
+logs one warning at boot, the opt-in card hides itself, and everything
+else — including the in-app notification records — works normally. Nothing
+fails because notifications aren't configured.
+
+To turn it on, generate a key pair once and set both halves on Render:
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+Keep the same pair for the life of the deployment. Rotating the public key
+invalidates every existing subscription — browsers tie a subscription to
+the key it was created with, and users have to re-enable notifications by
+hand.
 
 Don't set `PORT` — Render injects it and `server.js` reads it.
 
@@ -211,8 +232,16 @@ curl https://abuad-src-portal-backend.onrender.com/
 If you still see `"running smoothly!"`, the new deploy hasn't taken over.
 
 > First request after idle takes ~50s on the free plan while the instance
-> wakes. Not a bug. It does mean a cold sign-in can feel broken, so
-> consider pinging `/health` on a schedule.
+> wakes. Not a bug. It does mean a cold sign-in can feel broken, which is
+> what `.github/workflows/keepalive.yml` is for — it pings `/health` every
+> 10 minutes so the service rarely gets the chance to idle.
+>
+> Two things to know about that workflow. GitHub's scheduler is
+> best-effort and drops runs under load, so treat the interval as "usually
+> 10 minutes"; the gap to Render's ~15 minute timeout is the safety
+> margin. And GitHub disables scheduled workflows in repos with no commits
+> for 60 days — if the API starts sleeping again months from now, re-enable
+> it from the Actions tab before hunting for a code change.
 
 ---
 

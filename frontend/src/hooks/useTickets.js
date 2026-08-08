@@ -44,6 +44,11 @@ export function useTickets(params) {
   }, [key]);
 
   useEffect(() => {
+    // Fetch-on-mount. `load` flips `loading` synchronously so the list
+    // shows a spinner on the first paint rather than an empty state that
+    // flashes to content; the request is aborted on cleanup. Without a
+    // data-fetching library this is the intended escape hatch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
     return () => controller.current?.abort();
   }, [load]);

@@ -126,19 +126,26 @@ frontend/
 - **Phase 2:** Ticket routes, comment threads, voting, attachments
 - **Phase 3:** React Router, split `App.jsx`, PWA manifest, service worker
 - **Phase 4:** All 13 features:
-  - 4a: Comments/timeline + notifications + Web Push
-  - 4b: Anonymous mode + assignment/SLA + satisfaction/reopen
-  - 4c: Public board + upvoting + public tracking
-  - 4d: Search overhaul + admin analytics
-  - 4e: Map picker + announcements/polls
-  - 4f: Realtime + dark mode + admin user management
+  - **4a (done):** Comments/timeline, in-app notifications (header bell),
+    Web Push
+  - **4b (partial):** Anonymous mode ✅, assignment + SLA due dates ✅,
+    satisfaction rating / reopen — **not built** (the `TicketRating` model
+    exists, no routes or UI)
+  - **4c (partial):** Public board ✅, upvoting ✅, public tracking by
+    ticket number for non-signed-in users — **not built**
+  - **4d (partial):** Free-text search ✅ (description, location, ticket
+    number), admin analytics beyond the current counts — **not built**
+  - **4e:** Map picker, announcements/polls — **not built** (models and RLS
+    policies exist; no routes, no UI)
+  - **4f:** Realtime, dark mode, admin user management — **not built**
+    (roles are set in Supabase Studio for now)
 
 ---
 
 ## 🚢 Deployment
 
 **Frontend:** Vercel (auto-deploy from `main`)
-**Backend:** Render free tier or Fly.io (remember the keep-alive GitHub Action — see `backend/.github/workflows/keepalive.yml` placeholder)
+**Backend:** Render free tier or Fly.io. The keep-alive GitHub Action lives at `.github/workflows/keepalive.yml` — repository root, because that is the only path GitHub reads workflows from. Point it elsewhere and it silently never runs.
 **Database:** Stays on Supabase
 
 Before launch:

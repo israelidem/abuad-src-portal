@@ -18,11 +18,12 @@ import { STATUSES, URGENCIES, CATEGORIES, timeAgo, dueLabel, formatDate } from '
 import { Badge } from '../components/TicketCard.jsx';
 import { Spinner, FullPageSpinner } from '../components/Spinner.jsx';
 import StaffControls from '../components/StaffControls.jsx';
+import ResolutionActions from '../components/ResolutionActions.jsx';
 
 export default function TicketDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { isAuthenticated, isStaff, user } = useAuth();
+  const { isAuthenticated, isStaff } = useAuth();
   const toast = useToast();
 
   const [ticket, setTicket] = useState(null);
@@ -61,6 +62,9 @@ export default function TicketDetail() {
   }, [id, navigate]);
 
   useEffect(() => {
+    // Fetch-on-mount; see the note in useTickets for why the synchronous
+    // loading flag is deliberate here.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
 
@@ -186,10 +190,12 @@ export default function TicketDetail() {
               </dd>
             </div>
           )}
-          {ticket.assignee && (
+          {/* API field is `assignedTo`. `assignee` never existed, so this
+              row never rendered even on assigned tickets. */}
+          {ticket.assignedTo && (
             <div>
               <dt className="text-xs text-slate-500">Assigned to</dt>
-              <dd className="mt-0.5 text-slate-800">{ticket.assignee.fullName}</dd>
+              <dd className="mt-0.5 text-slate-800">{ticket.assignedTo.fullName}</dd>
             </div>
           )}
           {ticket.department && (
@@ -220,6 +226,10 @@ export default function TicketDetail() {
 
       {isStaff && <StaffControls ticket={ticket} onUpdated={load} />}
 
+      {/* Renders nothing unless you're the reporter and it's resolved —
+          that check lives in the component, so no duplicate here. */}
+      <ResolutionActions ticket={ticket} onChanged={load} />
+
       {ticket.events?.length > 0 && (
         <section className="mt-6 rounded-xl border border-slate-200 bg-white p-6">
           <h2 className="mb-4 font-semibold text-slate-900">Activity</h2>
@@ -232,16 +242,44 @@ export default function TicketDetail() {
                     {event.type === 'STATUS_CHANGED' && (
                       <>
                         Status changed to{' '}
-                        <span className="font-medium">
-                          {STATUSES[event.metadata?.to]?.label ?? event.metadata?.to}
+                        {/* The API returns `to` at the top level of the event;
+                            `metadata` only carries the optional note. Reading
+                            metadata.to left this label permanently blank. */}
+                        <span
+                          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${
+                            STATUSES[event.to]?.className ??
+                            'border-slate-200 bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          {STATUSES[event.to]?.label ?? event.to ?? 'unknown'}
                         </span>
                       </>
                     )}
+                    {event.type === 'REOPENED' && 'Issue reopened'}
                     {event.type === 'ASSIGNED' && 'Assigned to a representative'}
+                    {event.type === 'UNASSIGNED' && 'Assignment removed'}
                     {event.type === 'CREATED' && 'Issue reported'}
                     {event.type === 'COMMENTED' && 'New comment'}
-                    {event.type === 'ESCALATED' && 'Escalated'}
+                    {event.type === 'RATED' && 'Resolution rated'}
+                    {event.type === 'ATTACHMENT_ADDED' && 'Photo added'}
+                    {event.type === 'DUE_DATE_CHANGED' && 'Target date changed'}
+                    {/* toName is denormalised onto the event — from/to hold
+                        department UUIDs, which mean nothing to a reader. */}
+                    {event.type === 'DEPARTMENT_CHANGED' && (
+                      <>Routed to {event.metadata?.toName ?? 'another department'}</>
+                    )}
+                    {event.type === 'FLAGGED' && 'Flagged for moderation'}
+                    {event.type === 'UNFLAGGED' && 'Moderation flag removed'}
                   </p>
+
+                  {/* The note a rep leaves with a status change is the
+                      "why". It was being stored and never displayed. */}
+                  {event.metadata?.note && (
+                    <p className="mt-1 border-l-2 border-slate-200 pl-2 text-sm italic text-slate-600">
+                      {event.metadata.note}
+                    </p>
+                  )}
+
                   <p className="text-xs text-slate-400">
                     {event.actor?.fullName ?? 'System'} · {timeAgo(event.createdAt)}
                   </p>

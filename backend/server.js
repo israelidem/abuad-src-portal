@@ -17,6 +17,10 @@ import { errorHandler, notFoundHandler } from './src/middleware/errorHandler.js'
 import authRoutes from './src/routes/authRoutes.js';
 import ticketRoutes from './src/routes/ticketRoutes.js';
 import departmentRoutes from './src/routes/departmentRoutes.js';
+import notificationRoutes from './src/routes/notificationRoutes.js';
+import adminRoutes from './src/routes/adminRoutes.js';
+import announcementRoutes from './src/routes/announcementRoutes.js';
+import { maintenanceGuard } from './src/middleware/maintenance.js';
 
 const app = express();
 
@@ -60,9 +64,17 @@ app.get('/', (_req, res) => {
 });
 
 app.use('/api', apiLimiter);
+
+// Ahead of the routers so every mutating endpoint is covered without
+// each one remembering the check. Reads and staff always pass through.
+app.use('/api', maintenanceGuard);
+
 app.use('/api/auth', authRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/departments', departmentRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/announcements', announcementRoutes);
+app.use('/api/admin', adminRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

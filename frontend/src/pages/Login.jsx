@@ -11,6 +11,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { Spinner } from '../components/Spinner.jsx';
+import Logo from '../components/Logo.jsx';
 
 export default function Login() {
   const { signIn } = useAuth();
@@ -46,6 +47,7 @@ export default function Login() {
   return (
     <div className="mx-auto max-w-md py-8">
       <div className="rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
+        <Logo size="lg" onLight className="mx-auto mb-4" />
         <h1 className="mb-1 text-2xl font-semibold text-slate-900">Welcome back</h1>
         <p className="mb-6 text-sm text-slate-600">Sign in to track and report campus issues.</p>
 

@@ -1,1 +1,21 @@
 @import "tailwindcss";
+
+/*
+ * Tailwind v4 wires `dark:` to prefers-color-scheme by default, which
+ * ignores an in-app toggle. Redefining the variant against a `.dark`
+ * class on <html> lets ThemeContext drive it, while the "system" setting
+ * still works because that mode adds/removes the same class.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Respect users who have asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

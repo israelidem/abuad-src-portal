@@ -10,6 +10,7 @@ import { Check, Mail, Shield } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 import { Spinner } from '../components/Spinner.jsx';
+import NotificationSettings from '../components/NotificationSettings.jsx';
 
 const FIELDS = [
   { name: 'fullName', label: 'Full name', required: true },
@@ -118,6 +119,12 @@ export default function Profile() {
           </button>
         </div>
       </form>
+
+      {/* Outside the form — this toggle saves itself, and nesting it
+          would make "Save changes" look responsible for it. */}
+      <div className="mt-6">
+        <NotificationSettings />
+      </div>
     </div>
   );
 }

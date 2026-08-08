@@ -53,8 +53,12 @@ export const requireRole =
     next();
   };
 
-export const requireStaff = requireRole('REP', 'ADMIN');
-export const requireAdmin = requireRole('ADMIN');
+// SUPER_ADMIN is included everywhere ADMIN is. It outranks ADMIN, so
+// omitting it would leave the highest role with fewer permissions than
+// the one below it.
+export const requireStaff = requireRole('REP', 'ADMIN', 'SUPER_ADMIN');
+export const requireAdmin = requireRole('ADMIN', 'SUPER_ADMIN');
+export const requireSuperAdmin = requireRole('SUPER_ADMIN');
 
 /**
  * Attaches `req.user` when a valid token is present, but never rejects.

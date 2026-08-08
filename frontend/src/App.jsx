@@ -14,12 +14,14 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
 import { AuthProvider } from './context/AuthContext.jsx';
 import { ToastProvider } from './context/ToastContext.jsx';
+import { ThemeProvider } from './context/ThemeContext.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import Layout from './components/Layout.jsx';
 import { FullPageSpinner } from './components/Spinner.jsx';
 import {
   RequireAuth,
   RequireStaff,
+  RequireSuperAdmin,
   RedirectIfAuthenticated,
 } from './components/RouteGuards.jsx';
 
@@ -34,6 +36,11 @@ const TicketDetail = lazy(() => import('./pages/TicketDetail.jsx'));
 const NewTicket = lazy(() => import('./pages/NewTicket.jsx'));
 const Profile = lazy(() => import('./pages/Profile.jsx'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard.jsx'));
+const Analytics = lazy(() => import('./pages/Analytics.jsx'));
+const UserManagement = lazy(() => import('./pages/UserManagement.jsx'));
+const PortalSettings = lazy(() => import('./pages/PortalSettings.jsx'));
+const Announcements = lazy(() => import('./pages/Announcements.jsx'));
+const TrackTicket = lazy(() => import('./pages/TrackTicket.jsx'));
 const NotFound = lazy(() => import('./pages/NotFound.jsx'));
 const Forbidden = lazy(() => import('./pages/Forbidden.jsx'));
 
@@ -41,14 +48,23 @@ export default function App() {
   return (
     <ErrorBoundary>
       <BrowserRouter>
-        <AuthProvider>
-          <ToastProvider>
+        {/* Theme sits outermost: it must apply even if auth or the API fail. */}
+        <ThemeProvider>
+          <AuthProvider>
+            <ToastProvider>
             <Suspense fallback={<FullPageSpinner />}>
               <Routes>
                 <Route element={<Layout />}>
                   {/* Public */}
                   <Route index element={<Home />} />
                   <Route path="tickets" element={<TicketList />} />
+                  <Route path="announcements" element={<Announcements />} />
+                  <Route path="track" element={<TrackTicket />} />
+
+                  {/* Before /tickets/:id, or "new" is read as an id. */}
+                  <Route path="tickets/new" element={<RequireAuth />}>
+                    <Route index element={<NewTicket />} />
+                  </Route>
                   <Route path="tickets/:id" element={<TicketDetail />} />
 
                   <Route
@@ -74,23 +90,30 @@ export default function App() {
                   {/* Signed in */}
                   <Route element={<RequireAuth />}>
                     <Route path="dashboard" element={<Dashboard />} />
-                    <Route path="tickets/new" element={<NewTicket />} />
                     <Route path="profile" element={<Profile />} />
                   </Route>
 
                   {/* REP and ADMIN */}
                   <Route element={<RequireStaff />}>
                     <Route path="admin" element={<AdminDashboard />} />
+                    <Route path="admin/analytics" element={<Analytics />} />
+                    <Route path="admin/users" element={<UserManagement />} />
+                  </Route>
+
+                  {/* SUPER_ADMIN only — can lock everyone out */}
+                  <Route element={<RequireSuperAdmin />}>
+                    <Route path="admin/settings" element={<PortalSettings />} />
                   </Route>
 
                   <Route path="403" element={<Forbidden />} />
                   <Route path="404" element={<NotFound />} />
                   <Route path="*" element={<Navigate to="/404" replace />} />
                 </Route>
-              </Routes>
-            </Suspense>
-          </ToastProvider>
-        </AuthProvider>
+                </Routes>
+              </Suspense>
+            </ToastProvider>
+          </AuthProvider>
+        </ThemeProvider>
       </BrowserRouter>
     </ErrorBoundary>
   );

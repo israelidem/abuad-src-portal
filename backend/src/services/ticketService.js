@@ -29,7 +29,18 @@ export const calculateDueDate = (urgency, from = new Date()) => {
   return new Date(from.getTime() + hours * 60 * 60 * 1000);
 };
 
-const isStaff = (user) => user?.role === 'REP' || user?.role === 'ADMIN';
+/**
+ * Staff = anyone who can act on other people's tickets.
+ *
+ * Exported because routes need the same test when gating staff-only
+ * fields on a shared endpoint. Keep this as the single definition — a
+ * second copy is how a new role gets missed in one place.
+ */
+/** SUPER_ADMIN outranks ADMIN, so it counts as staff everywhere ADMIN does. */
+export const isStaffUser = (user) =>
+  user?.role === 'REP' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+
+const isStaff = isStaffUser;
 
 /** Only these transitions are legal. Anything else is a 400. */
 const ALLOWED_TRANSITIONS = {
@@ -70,16 +81,19 @@ export const canViewTicket = (ticket, user) => {
  * once staff have engaged, the record needs to stay stable.
  * Admins can always edit.
  */
+/** ADMIN and above — SUPER_ADMIN must never have fewer rights than ADMIN. */
+const isAdminUser = (user) => user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+
 export const canEditTicket = (ticket, user) => {
   if (!user) return false;
-  if (user.role === 'ADMIN') return true;
+  if (isAdminUser(user)) return true;
   if (ticket.authorId !== user.id) return false;
   return ticket.status === 'PENDING';
 };
 
 export const canDeleteTicket = (ticket, user) => {
   if (!user) return false;
-  if (user.role === 'ADMIN') return true;
+  if (isAdminUser(user)) return true;
   return ticket.authorId === user.id && ticket.status === 'PENDING';
 };
 
@@ -137,6 +151,13 @@ export const serialiseTicket = (ticket, viewer = null, { hasVoted = null } = {})
 
     department: ticket.departmentRef ?? null,
     assignedTo: ticket.assignedTo ?? null,
+
+    // Raw foreign keys alongside the nested objects. Without these the
+    // client can't pre-select a <select> or tell "unassigned" from
+    // "assigned to someone I can't see", so edit forms silently reset
+    // to a blank value and then submit that blank as a real change.
+    departmentId: ticket.departmentId ?? null,
+    assignedToId: ticket.assignedToId ?? null,
 
     dueAt: ticket.dueAt,
     isOverdue: overdue,
@@ -198,7 +219,7 @@ export const serialiseComment = (comment, viewer = null) => {
     createdAt: comment.createdAt,
     updatedAt: comment.updatedAt,
     permissions: {
-      canEdit: viewer?.id === comment.authorId || viewer?.role === 'ADMIN',
+      canEdit: viewer?.id === comment.authorId || isAdminUser(viewer),
       canDelete: viewer?.id === comment.authorId || viewerIsStaff,
     },
   };

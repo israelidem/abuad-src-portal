@@ -14,6 +14,7 @@ import { Eye, EyeOff, AlertCircle, CheckCircle, Info } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { authApi } from '../lib/api.js';
 import { Spinner } from '../components/Spinner.jsx';
+import Logo from '../components/Logo.jsx';
 
 const FIELDS = [
   { name: 'fullName', label: 'Full name', type: 'text', required: true, autoComplete: 'name' },
@@ -109,6 +110,7 @@ export default function Signup() {
   return (
     <div className="mx-auto max-w-md py-8">
       <div className="rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
+        <Logo size="lg" onLight className="mx-auto mb-4" />
         <h1 className="mb-1 text-2xl font-semibold text-slate-900">Create your account</h1>
         <p className="mb-6 text-sm text-slate-600">
           Report campus issues and follow them through to resolution.

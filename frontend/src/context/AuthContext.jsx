@@ -148,10 +148,23 @@ export function AuthProvider({ children }) {
     const result = await authApi.signup(payload);
 
     if (result.session) {
-      await supabase.auth.setSession({
+      const { data } = await supabase.auth.setSession({
         access_token: result.session.access_token,
         refresh_token: result.session.refresh_token,
       });
+
+      // Same reasoning as signIn: load the profile before resolving so the
+      // caller can navigate straight to a guarded route. Waiting on the
+      // onAuthStateChange listener instead would leave `isAuthenticated`
+      // false for a moment, which `resolving` covers with a spinner — but
+      // only by luck of timing. Doing it here makes it deterministic.
+      const user = data?.session?.user ?? result.session.user;
+      if (user) {
+        setSession(data?.session ?? null);
+        setLoading(true);
+        await loadProfile(user.id);
+        setLoading(false);
+      }
     }
 
     return result;
@@ -199,8 +212,15 @@ export function AuthProvider({ children }) {
       // hasn't arrived. Guards must wait on this rather than on `loading`,
       // or they redirect during that gap.
       resolving: loading || (Boolean(session?.user) && !profile && !error),
-      isAdmin: profile?.role === 'ADMIN',
-      isStaff: profile?.role === 'REP' || profile?.role === 'ADMIN',
+      // SUPER_ADMIN sits above ADMIN, so it satisfies both flags. Listing
+      // only 'ADMIN' would hide the admin UI from the one account that
+      // most needs it.
+      isSuperAdmin: profile?.role === 'SUPER_ADMIN',
+      isAdmin: profile?.role === 'ADMIN' || profile?.role === 'SUPER_ADMIN',
+      isStaff:
+        profile?.role === 'REP' ||
+        profile?.role === 'ADMIN' ||
+        profile?.role === 'SUPER_ADMIN',
       role: profile?.role ?? null,
 
       signIn,
