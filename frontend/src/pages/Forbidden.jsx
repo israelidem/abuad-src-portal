@@ -8,8 +8,8 @@ export default function Forbidden() {
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">
       <ShieldOff size={48} className="mb-4 text-amber-500" aria-hidden="true" />
-      <h1 className="mb-2 text-2xl font-semibold text-slate-900">Not authorised</h1>
-      <p className="mb-6 max-w-md text-sm text-slate-600">
+      <h1 className="mb-2 text-2xl font-semibold text-slate-900 dark:text-white">Not authorised</h1>
+      <p className="mb-6 max-w-md text-sm text-slate-600 dark:text-slate-400">
         This area is for SRC representatives.
         {profile && (
           <>

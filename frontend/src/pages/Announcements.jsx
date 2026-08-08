@@ -163,7 +163,7 @@ function Composer({ onCreated }) {
           type="checkbox"
           checked={isPinned}
           onChange={(e) => setIsPinned(e.target.checked)}
-          className="rounded border-slate-300"
+          className="rounded border-slate-300 dark:border-slate-700"
         />
         Pin to the top
       </label>
@@ -185,6 +185,152 @@ function Composer({ onCreated }) {
         </button>
       </div>
     </form>
+  );
+}
+
+/**
+ * Edit/delete controls, shown to staff while the window is still open.
+ *
+ * The countdown is driven by `editWindowMs` from the API rather than by
+ * comparing `publishedAt` to the browser clock: a phone a few minutes
+ * fast would otherwise show an edit button the server refuses to honour.
+ */
+function AnnouncementActions({ announcement, onUpdated, onDeleted }) {
+  const toast = useToast();
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(announcement.title);
+  const [body, setBody] = useState(announcement.body);
+  const [busy, setBusy] = useState(false);
+
+  // Counts down from the server's figure, captured once on mount.
+  const [remaining, setRemaining] = useState(announcement.editWindowMs ?? 0);
+
+  useEffect(() => {
+    if (remaining <= 0) return undefined;
+    const startedAt = Date.now();
+    const initial = remaining;
+
+    const id = setInterval(() => {
+      const left = initial - (Date.now() - startedAt);
+      setRemaining(left > 0 ? left : 0);
+    }, 1000);
+
+    return () => clearInterval(id);
+    // Only re-arm when the window reopens (i.e. after a save), not on
+    // every tick — `remaining` changing each second would thrash the
+    // interval.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [announcement.id, announcement.editWindowMs]);
+
+  const canEdit = remaining > 0;
+  const minutes = Math.floor(remaining / 60000);
+  const seconds = Math.floor((remaining % 60000) / 1000);
+
+  const save = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const { announcement: updated } = await announcementApi.update(announcement.id, {
+        title: title.trim(),
+        body: body.trim(),
+      });
+      onUpdated(updated);
+      setEditing(false);
+      toast.success('Announcement updated.');
+    } catch (err) {
+      toast.error(err.displayMessage);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    // Deleting removes it for everyone who was notified, so make them mean it.
+    if (!window.confirm('Delete this announcement? This cannot be undone.')) return;
+
+    setBusy(true);
+    try {
+      await announcementApi.remove(announcement.id);
+      onDeleted(announcement.id);
+      toast.success('Announcement deleted.');
+    } catch (err) {
+      toast.error(err.displayMessage);
+      setBusy(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <form onSubmit={save} className="mt-3 space-y-2">
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          maxLength={150}
+          required
+          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+        />
+        <textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          rows={4}
+          maxLength={5000}
+          required
+          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+        />
+        <div className="flex gap-2">
+          <button
+            type="submit"
+            disabled={busy}
+            className="rounded-lg bg-[#006633] px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setEditing(false);
+              setTitle(announcement.title);
+              setBody(announcement.body);
+            }}
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700 dark:text-slate-300"
+          >
+            Cancel
+          </button>
+        </div>
+      </form>
+    );
+  }
+
+  return (
+    <div className="mt-3 flex items-center gap-3 border-t border-slate-100 pt-3 dark:border-slate-800">
+      {canEdit ? (
+        <>
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="text-xs font-medium text-[#006633] hover:underline dark:text-green-400"
+          >
+            Edit
+          </button>
+          <span className="text-xs text-slate-400 dark:text-slate-500">
+            {minutes}:{String(seconds).padStart(2, '0')} left to edit
+          </span>
+        </>
+      ) : (
+        <span className="text-xs text-slate-400 dark:text-slate-500">
+          Edit window closed
+        </span>
+      )}
+
+      <button
+        type="button"
+        onClick={remove}
+        disabled={busy}
+        className="ml-auto text-xs font-medium text-red-600 hover:underline disabled:opacity-60 dark:text-red-400"
+      >
+        Delete
+      </button>
+    </div>
   );
 }
 
@@ -281,6 +427,24 @@ export default function Announcements() {
               {a.polls?.map((poll) => (
                 <Poll key={poll.id} poll={poll} onVoted={replacePoll} />
               ))}
+
+              {isStaff && (
+                <AnnouncementActions
+                  announcement={a}
+                  onUpdated={(updated) =>
+                    setAnnouncements((current) =>
+                      current.map((item) =>
+                        // Keep the polls already loaded: the update
+                        // response doesn't include them.
+                        item.id === updated.id ? { ...item, ...updated } : item
+                      )
+                    )
+                  }
+                  onDeleted={(id) =>
+                    setAnnouncements((current) => current.filter((item) => item.id !== id))
+                  }
+                />
+              )}
             </article>
           ))}
         </div>

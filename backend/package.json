@@ -16,6 +16,7 @@
     "migrate:deploy": "dotenv -e .env -- npx prisma migrate deploy",
     "db:push": "dotenv -e .env -- npx prisma db push",
     "generate": "prisma generate",
+    "validate": "dotenv -e .env -- npx prisma validate",
     "studio": "dotenv -e .env -- npx prisma studio",
     "check:db": "node scripts/check-db.mjs",
     "smoke": "node scripts/smoke-routes.mjs",

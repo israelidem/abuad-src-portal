@@ -4,15 +4,15 @@ import { FileQuestion } from 'lucide-react';
 export default function NotFound() {
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">
-      <FileQuestion size={48} className="mb-4 text-slate-400" aria-hidden="true" />
-      <h1 className="mb-2 text-2xl font-semibold text-slate-900">Page not found</h1>
-      <p className="mb-6 max-w-sm text-sm text-slate-600">
+      <FileQuestion size={48} className="mb-4 text-slate-400 dark:text-slate-500" aria-hidden="true" />
+      <h1 className="mb-2 text-2xl font-semibold text-slate-900 dark:text-white">Page not found</h1>
+      <p className="mb-6 max-w-sm text-sm text-slate-600 dark:text-slate-400">
         The page you&apos;re looking for doesn&apos;t exist, or the ticket may have been removed.
       </p>
       <div className="flex gap-3">
         <Link
           to="/tickets"
-          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium hover:bg-slate-50"
+          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium hover:bg-slate-50 dark:border-slate-700"
         >
           Browse issues
         </Link>

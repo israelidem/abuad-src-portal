@@ -35,16 +35,16 @@ export default class ErrorBoundary extends Component {
     if (!error) return this.props.children;
 
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
-        <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 dark:bg-slate-900">
+        <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <AlertTriangle className="mx-auto mb-4 text-amber-500" size={40} />
-          <h1 className="mb-2 text-xl font-semibold text-slate-900">Something went wrong</h1>
-          <p className="mb-6 text-sm text-slate-600">
+          <h1 className="mb-2 text-xl font-semibold text-slate-900 dark:text-white">Something went wrong</h1>
+          <p className="mb-6 text-sm text-slate-600 dark:text-slate-400">
             The page failed to load. This has been logged — please try again.
           </p>
 
           {import.meta.env.DEV && (
-            <pre className="mb-6 max-h-40 overflow-auto rounded bg-slate-100 p-3 text-left text-xs text-red-700">
+            <pre className="mb-6 max-h-40 overflow-auto rounded bg-slate-100 p-3 text-left text-xs text-red-700 dark:bg-slate-800 dark:text-red-300">
               {error.message}
             </pre>
           )}
@@ -53,7 +53,7 @@ export default class ErrorBoundary extends Component {
             <button
               type="button"
               onClick={this.handleReset}
-              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium hover:bg-slate-50"
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium hover:bg-slate-50 dark:border-slate-700"
             >
               Try again
             </button>

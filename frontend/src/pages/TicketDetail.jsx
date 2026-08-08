@@ -102,7 +102,7 @@ export default function TicketDetail() {
 
   if (error) {
     return (
-      <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+      <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
         {error}
       </div>
     );
@@ -116,26 +116,26 @@ export default function TicketDetail() {
     <div className="mx-auto max-w-3xl">
       <Link
         to="/tickets"
-        className="mb-4 inline-flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900"
+        className="mb-4 inline-flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400"
       >
         <ArrowLeft size={16} />
         All issues
       </Link>
 
-      <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <Badge className={status.className}>{status.label}</Badge>
           <Badge className={urgency.className}>{urgency.label}</Badge>
-          <Badge className="border-slate-200 bg-slate-50 text-slate-600">
+          <Badge className="border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
             {CATEGORIES[ticket.category]?.label ?? ticket.category}
           </Badge>
           {ticket.isOverdue && (
-            <Badge className="border-red-200 bg-red-50 text-red-700">Overdue</Badge>
+            <Badge className="border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">Overdue</Badge>
           )}
-          <span className="ml-auto font-mono text-xs text-slate-400">{ticket.ticketNumber}</span>
+          <span className="ml-auto font-mono text-xs text-slate-400 dark:text-slate-500">{ticket.ticketNumber}</span>
         </div>
 
-        <p className="mb-5 whitespace-pre-wrap text-[15px] leading-relaxed text-slate-800">
+        <p className="mb-5 whitespace-pre-wrap text-[15px] leading-relaxed text-slate-800 dark:text-slate-100">
           {ticket.description}
         </p>
 
@@ -147,7 +147,7 @@ export default function TicketDetail() {
                   href={getAttachmentUrl(a.storagePath)}
                   target="_blank"
                   rel="noreferrer"
-                  className="block aspect-square overflow-hidden rounded-lg border border-slate-200"
+                  className="block aspect-square overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800"
                 >
                   <img
                     src={getAttachmentUrl(a.storagePath)}
@@ -161,21 +161,21 @@ export default function TicketDetail() {
           </ul>
         )}
 
-        <dl className="mb-5 grid grid-cols-2 gap-3 border-y border-slate-100 py-4 text-sm sm:grid-cols-4">
+        <dl className="mb-5 grid grid-cols-2 gap-3 border-y border-slate-100 py-4 text-sm sm:grid-cols-4 dark:border-slate-800">
           <div>
-            <dt className="text-xs text-slate-500">Reported by</dt>
-            <dd className="mt-0.5 font-medium text-slate-800">
+            <dt className="text-xs text-slate-500 dark:text-slate-400">Reported by</dt>
+            <dd className="mt-0.5 font-medium text-slate-800 dark:text-slate-100">
               {ticket.isAnonymous ? <span className="italic">Anonymous</span> : ticket.author?.fullName}
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-slate-500">Reported</dt>
-            <dd className="mt-0.5 text-slate-800">{formatDate(ticket.createdAt)}</dd>
+            <dt className="text-xs text-slate-500 dark:text-slate-400">Reported</dt>
+            <dd className="mt-0.5 text-slate-800 dark:text-slate-100">{formatDate(ticket.createdAt)}</dd>
           </div>
           {ticket.location?.text && (
             <div>
-              <dt className="text-xs text-slate-500">Location</dt>
-              <dd className="mt-0.5 flex items-center gap-1 text-slate-800">
+              <dt className="text-xs text-slate-500 dark:text-slate-400">Location</dt>
+              <dd className="mt-0.5 flex items-center gap-1 text-slate-800 dark:text-slate-100">
                 <MapPin size={13} />
                 {ticket.location.text}
               </dd>
@@ -183,7 +183,7 @@ export default function TicketDetail() {
           )}
           {due && (
             <div>
-              <dt className="text-xs text-slate-500">Target</dt>
+              <dt className="text-xs text-slate-500 dark:text-slate-400">Target</dt>
               <dd className={`mt-0.5 flex items-center gap-1 ${ticket.isOverdue ? 'font-medium text-red-600' : 'text-slate-800'}`}>
                 <Clock size={13} />
                 {due}
@@ -194,14 +194,14 @@ export default function TicketDetail() {
               row never rendered even on assigned tickets. */}
           {ticket.assignedTo && (
             <div>
-              <dt className="text-xs text-slate-500">Assigned to</dt>
-              <dd className="mt-0.5 text-slate-800">{ticket.assignedTo.fullName}</dd>
+              <dt className="text-xs text-slate-500 dark:text-slate-400">Assigned to</dt>
+              <dd className="mt-0.5 text-slate-800 dark:text-slate-100">{ticket.assignedTo.fullName}</dd>
             </div>
           )}
           {ticket.department && (
             <div>
-              <dt className="text-xs text-slate-500">Department</dt>
-              <dd className="mt-0.5 text-slate-800">{ticket.department.name}</dd>
+              <dt className="text-xs text-slate-500 dark:text-slate-400">Department</dt>
+              <dd className="mt-0.5 text-slate-800 dark:text-slate-100">{ticket.department.name}</dd>
             </div>
           )}
         </dl>
@@ -231,14 +231,14 @@ export default function TicketDetail() {
       <ResolutionActions ticket={ticket} onChanged={load} />
 
       {ticket.events?.length > 0 && (
-        <section className="mt-6 rounded-xl border border-slate-200 bg-white p-6">
-          <h2 className="mb-4 font-semibold text-slate-900">Activity</h2>
+        <section className="mt-6 rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
+          <h2 className="mb-4 font-semibold text-slate-900 dark:text-white">Activity</h2>
           <ol className="space-y-3">
             {ticket.events.map((event) => (
               <li key={event.id} className="flex gap-3 text-sm">
                 <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-slate-300" aria-hidden="true" />
                 <div>
-                  <p className="text-slate-700">
+                  <p className="text-slate-700 dark:text-slate-300">
                     {event.type === 'STATUS_CHANGED' && (
                       <>
                         Status changed to{' '}
@@ -275,12 +275,12 @@ export default function TicketDetail() {
                   {/* The note a rep leaves with a status change is the
                       "why". It was being stored and never displayed. */}
                   {event.metadata?.note && (
-                    <p className="mt-1 border-l-2 border-slate-200 pl-2 text-sm italic text-slate-600">
+                    <p className="mt-1 border-l-2 border-slate-200 pl-2 text-sm italic text-slate-600 dark:border-slate-800 dark:text-slate-400">
                       {event.metadata.note}
                     </p>
                   )}
 
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-slate-400 dark:text-slate-500">
                     {event.actor?.fullName ?? 'System'} · {timeAgo(event.createdAt)}
                   </p>
                 </div>
@@ -290,13 +290,13 @@ export default function TicketDetail() {
         </section>
       )}
 
-      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-6">
-        <h2 className="mb-4 font-semibold text-slate-900">
+      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
+        <h2 className="mb-4 font-semibold text-slate-900 dark:text-white">
           Comments ({ticket.comments?.length ?? 0})
         </h2>
 
         {ticket.comments?.length === 0 && (
-          <p className="mb-4 text-sm text-slate-500">No comments yet.</p>
+          <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">No comments yet.</p>
         )}
 
         <ul className="mb-5 space-y-4">
@@ -306,7 +306,7 @@ export default function TicketDetail() {
               className={`rounded-lg p-4 ${c.isInternal ? 'border border-amber-200 bg-amber-50' : 'bg-slate-50'}`}
             >
               <div className="mb-1 flex flex-wrap items-center gap-2 text-xs">
-                <span className="font-medium text-slate-800">
+                <span className="font-medium text-slate-800 dark:text-slate-100">
                   {c.author?.fullName ?? 'Anonymous'}
                 </span>
                 {c.author?.role && c.author.role !== 'STUDENT' && (
@@ -315,16 +315,16 @@ export default function TicketDetail() {
                   </Badge>
                 )}
                 {c.isInternal && (
-                  <Badge className="border-amber-300 bg-amber-100 text-amber-800">
+                  <Badge className="border-amber-300 bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200">
                     <Lock size={10} className="mr-1" />
                     Internal
                   </Badge>
                 )}
-                <time className="ml-auto text-slate-400" dateTime={c.createdAt}>
+                <time className="ml-auto text-slate-400 dark:text-slate-500" dateTime={c.createdAt}>
                   {timeAgo(c.createdAt)}
                 </time>
               </div>
-              <p className="whitespace-pre-wrap text-sm text-slate-700">{c.body}</p>
+              <p className="whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-300">{c.body}</p>
             </li>
           ))}
         </ul>
@@ -340,17 +340,17 @@ export default function TicketDetail() {
               onChange={(e) => setComment(e.target.value)}
               rows={3}
               placeholder="Add an update or ask a question…"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-[#006633] focus:outline-none focus:ring-1 focus:ring-[#006633]"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-[#006633] focus:outline-none focus:ring-1 focus:ring-[#006633] dark:border-slate-700"
             />
 
             <div className="flex items-center justify-between">
               {isStaff ? (
-                <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-600">
+                <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
                   <input
                     type="checkbox"
                     checked={internal}
                     onChange={(e) => setInternal(e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300 text-[#006633] focus:ring-[#006633]"
+                    className="h-4 w-4 rounded border-slate-300 text-[#006633] focus:ring-[#006633] dark:border-slate-700"
                   />
                   Internal note (staff only)
                 </label>
@@ -369,7 +369,7 @@ export default function TicketDetail() {
             </div>
           </form>
         ) : (
-          <p className="flex items-center gap-2 rounded-lg bg-slate-50 p-4 text-sm text-slate-600">
+          <p className="flex items-center gap-2 rounded-lg bg-slate-50 p-4 text-sm text-slate-600 dark:bg-slate-900 dark:text-slate-400">
             <AlertCircle size={16} />
             <Link to="/login" className="font-medium text-[#006633] hover:underline">
               Sign in

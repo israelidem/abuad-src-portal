@@ -26,7 +26,7 @@ export function FullPageSpinner({ label = 'Loading…' }) {
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4">
       <Spinner size="lg" className="text-[#006633]" />
-      <p className="text-sm text-slate-500">{label}</p>
+      <p className="text-sm text-slate-500 dark:text-slate-400">{label}</p>
     </div>
   );
 }
@@ -38,12 +38,12 @@ export function FullPageSpinner({ label = 'Loading…' }) {
  * doesn't jump when it arrives.
  */
 export function Skeleton({ className = '' }) {
-  return <div className={`animate-pulse rounded bg-slate-200 ${className}`} aria-hidden="true" />;
+  return <div className={`animate-pulse rounded bg-slate-200 dark:bg-slate-700${className}`} aria-hidden="true" />;
 }
 
 export function TicketCardSkeleton() {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5">
+    <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
       <div className="mb-3 flex items-center gap-3">
         <Skeleton className="h-5 w-24" />
         <Skeleton className="h-5 w-16" />

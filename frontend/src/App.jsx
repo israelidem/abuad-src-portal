@@ -21,6 +21,7 @@ import { FullPageSpinner } from './components/Spinner.jsx';
 import {
   RequireAuth,
   RequireStaff,
+  RequireAdmin,
   RequireSuperAdmin,
   RedirectIfAuthenticated,
 } from './components/RouteGuards.jsx';
@@ -38,6 +39,7 @@ const Profile = lazy(() => import('./pages/Profile.jsx'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard.jsx'));
 const Analytics = lazy(() => import('./pages/Analytics.jsx'));
 const UserManagement = lazy(() => import('./pages/UserManagement.jsx'));
+const Moderation = lazy(() => import('./pages/Moderation.jsx'));
 const PortalSettings = lazy(() => import('./pages/PortalSettings.jsx'));
 const Announcements = lazy(() => import('./pages/Announcements.jsx'));
 const TrackTicket = lazy(() => import('./pages/TrackTicket.jsx'));
@@ -98,6 +100,12 @@ export default function App() {
                     <Route path="admin" element={<AdminDashboard />} />
                     <Route path="admin/analytics" element={<Analytics />} />
                     <Route path="admin/users" element={<UserManagement />} />
+                  </Route>
+
+                  {/* ADMIN only — the moderation queue can unmask an
+                      anonymous author, so a REP must not reach it. */}
+                  <Route element={<RequireAdmin />}>
+                    <Route path="admin/moderation" element={<Moderation />} />
                   </Route>
 
                   {/* SUPER_ADMIN only — can lock everyone out */}

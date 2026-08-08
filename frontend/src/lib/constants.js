@@ -12,17 +12,17 @@ export const BRAND = {
 };
 
 export const STATUSES = {
-  PENDING: { label: 'Pending', className: 'bg-amber-100 text-amber-800 border-amber-200' },
-  IN_PROGRESS: { label: 'In progress', className: 'bg-blue-100 text-blue-800 border-blue-200' },
-  RESOLVED: { label: 'Resolved', className: 'bg-green-100 text-green-800 border-green-200' },
-  CLOSED: { label: 'Closed', className: 'bg-slate-100 text-slate-700 border-slate-200' },
-  REOPENED: { label: 'Reopened', className: 'bg-purple-100 text-purple-800 border-purple-200' },
+  PENDING: { label: 'Pending', className: 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-950 dark:text-amber-200 dark:border-amber-900/50' },
+  IN_PROGRESS: { label: 'In progress', className: 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-900/50' },
+  RESOLVED: { label: 'Resolved', className: 'bg-green-100 text-green-800 border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-200/20' },
+  CLOSED: { label: 'Closed', className: 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-800' },
+  REOPENED: { label: 'Reopened', className: 'bg-purple-100 text-purple-800 border-purple-200 dark:bg-purple-950 dark:text-purple-300 dark:border-purple-900/50' },
 };
 
 export const URGENCIES = {
-  LOW: { label: 'Low', className: 'bg-slate-100 text-slate-700 border-slate-200' },
-  MEDIUM: { label: 'Medium', className: 'bg-amber-100 text-amber-800 border-amber-200' },
-  HIGH: { label: 'High', className: 'bg-red-100 text-red-800 border-red-200' },
+  LOW: { label: 'Low', className: 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-800' },
+  MEDIUM: { label: 'Medium', className: 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-950 dark:text-amber-200 dark:border-amber-900/50' },
+  HIGH: { label: 'High', className: 'bg-red-100 text-red-800 border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-900/50' },
 };
 
 export const CATEGORIES = {

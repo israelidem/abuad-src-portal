@@ -67,7 +67,6 @@ export default function NewTicket() {
 
   const [form, setForm] = useState({
     faculty: profile?.faculty ?? '',
-    category: '',
     description: '',
     urgency: 'MEDIUM',
     locationText: '',
@@ -79,8 +78,17 @@ export default function NewTicket() {
     departmentApi
       .list()
       .then((data) => setDepartments(data.departments))
-      .catch(() => setDepartments([])); // the field is optional
+      // The picker is required now, so a failed fetch leaves the form
+      // unsubmittable. Say so rather than showing an empty dropdown the
+      // student can't get past.
+      .catch(() =>
+        setError('Could not load the list of departments. Please refresh and try again.')
+      );
   }, []);
+
+  // The category is no longer asked for — it follows from the department,
+  // and this is what lets the form show which one it will be.
+  const selectedDepartment = departments.find((d) => d.id === form.departmentId) ?? null;
 
   const update = (field) => (event) => {
     const value =
@@ -93,6 +101,10 @@ export default function NewTicket() {
     event.preventDefault();
     setError('');
     setFieldErrors({});
+
+    if (!form.departmentId) {
+      return setFieldErrors({ departmentId: 'Please choose what this is about.' });
+    }
 
     if (form.description.trim().length < MIN_DESCRIPTION) {
       return setFieldErrors({
@@ -120,7 +132,7 @@ export default function NewTicket() {
 
       const { ticket } = await ticketApi.create({
         ...fields,
-        departmentId: form.departmentId || undefined,
+        // No `category` — the API derives it from the department.
         locationText: form.locationText || undefined,
         isPublic: preset.isPublic,
         isAnonymous: preset.isAnonymous,
@@ -152,15 +164,15 @@ export default function NewTicket() {
 
   return (
     <div className="mx-auto max-w-2xl py-4">
-      <h1 className="mb-1 text-2xl font-semibold text-slate-900">Report an issue</h1>
-      <p className="mb-6 text-sm text-slate-600">
+      <h1 className="mb-1 text-2xl font-semibold text-slate-900 dark:text-white">Report an issue</h1>
+      <p className="mb-6 text-sm text-slate-600 dark:text-slate-400">
         The more detail you give, the faster the SRC can act.
       </p>
 
       {error && (
         <div
           role="alert"
-          className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+          className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300"
         >
           <AlertCircle size={16} className="mt-0.5 shrink-0" />
           <span>{error}</span>
@@ -169,35 +181,41 @@ export default function NewTicket() {
 
       <form
         onSubmit={handleSubmit}
-        className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
+        className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"
         noValidate
       >
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label htmlFor="category" className="mb-1 block text-sm font-medium text-slate-700">
-              Category <span className="text-red-500">*</span>
+            <label htmlFor="departmentId" className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
+              What is this about? <span className="text-red-500">*</span>
             </label>
             <select
-              id="category"
-              value={form.category}
-              onChange={update('category')}
+              id="departmentId"
+              value={form.departmentId}
+              onChange={update('departmentId')}
               required
-              className={inputClass('category')}
+              className={inputClass('departmentId')}
             >
-              <option value="">Choose a category</option>
-              {Object.entries(CATEGORIES).map(([value, { label }]) => (
-                <option key={value} value={value}>
-                  {label}
+              <option value="">Choose the desk that handles this</option>
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
                 </option>
               ))}
             </select>
-            {fieldErrors.category && (
-              <p className="mt-1 text-xs text-red-600">{fieldErrors.category}</p>
+            {fieldErrors.departmentId ? (
+              <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                {fieldErrors.departmentId}
+              </p>
+            ) : (
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                This decides who picks it up. The SRC can re-route it if it lands wrong.
+              </p>
             )}
           </div>
 
           <div>
-            <label htmlFor="urgency" className="mb-1 block text-sm font-medium text-slate-700">
+            <label htmlFor="urgency" className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
               Urgency <span className="text-red-500">*</span>
             </label>
             <select
@@ -213,13 +231,13 @@ export default function NewTicket() {
                 </option>
               ))}
             </select>
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               High is resolved within 24 hours, medium 3 days, low a week.
             </p>
           </div>
 
           <div>
-            <label htmlFor="faculty" className="mb-1 block text-sm font-medium text-slate-700">
+            <label htmlFor="faculty" className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
               Faculty <span className="text-red-500">*</span>
             </label>
             <input
@@ -232,38 +250,37 @@ export default function NewTicket() {
               className={inputClass('faculty')}
             />
             {fieldErrors.faculty && (
-              <p className="mt-1 text-xs text-red-600">{fieldErrors.faculty}</p>
+              <p className="mt-1 text-xs text-red-600 dark:text-red-400">{fieldErrors.faculty}</p>
             )}
           </div>
 
           <div>
-            <label htmlFor="departmentId" className="mb-1 block text-sm font-medium text-slate-700">
-              Route to <span className="font-normal text-slate-400">(optional)</span>
+            <label htmlFor="urgencyNote" className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
+              Category
             </label>
-            <select
-              id="departmentId"
-              value={form.departmentId}
-              onChange={update('departmentId')}
-              className={inputClass('departmentId')}
+            {/* Read-only: the category now follows from the department, so
+                showing it as a second dropdown just asked the same
+                question twice. Kept visible because students recognise
+                their report by it on the board. */}
+            <p
+              id="urgencyNote"
+              className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
             >
-              <option value="">Let the SRC decide</option>
-              {departments.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
+              {selectedDepartment
+                ? CATEGORIES[selectedDepartment.category]?.label ?? 'Other'
+                : 'Set automatically from your choice above'}
+            </p>
           </div>
         </div>
 
         <div>
-          <label htmlFor="locationText" className="mb-1 block text-sm font-medium text-slate-700">
-            Location <span className="font-normal text-slate-400">(optional)</span>
+          <label htmlFor="locationText" className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
+            Location <span className="font-normal text-slate-400 dark:text-slate-500">(optional)</span>
           </label>
           <div className="relative">
             <MapPin
               size={16}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
               aria-hidden="true"
             />
             <input
@@ -278,7 +295,7 @@ export default function NewTicket() {
         </div>
 
         <div>
-          <label htmlFor="description" className="mb-1 block text-sm font-medium text-slate-700">
+          <label htmlFor="description" className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
             What&apos;s the problem? <span className="text-red-500">*</span>
           </label>
           <textarea
@@ -300,7 +317,7 @@ export default function NewTicket() {
               : `${form.description.trim().length} characters`}
           </p>
           {fieldErrors.description && (
-            <p className="mt-1 text-xs text-red-600">{fieldErrors.description}</p>
+            <p className="mt-1 text-xs text-red-600 dark:text-red-400">{fieldErrors.description}</p>
           )}
         </div>
 
@@ -314,8 +331,8 @@ export default function NewTicket() {
           least obvious to reach. A single list makes the visibility and
           the naming consequence of each option explicit.
         */}
-        <fieldset className="space-y-2 rounded-lg bg-slate-50 p-4">
-          <legend className="px-1 text-sm font-medium text-slate-700">
+        <fieldset className="space-y-2 rounded-lg bg-slate-50 p-4 dark:bg-slate-900">
+          <legend className="px-1 text-sm font-medium text-slate-700 dark:text-slate-300">
             Who can see this report?
           </legend>
 
@@ -336,23 +353,23 @@ export default function NewTicket() {
                   value={option.value}
                   checked={selected}
                   onChange={() => setForm((prev) => ({ ...prev, privacy: option.value }))}
-                  className="mt-0.5 h-4 w-4 border-slate-300 text-[#006633] focus:ring-[#006633]"
+                  className="mt-0.5 h-4 w-4 border-slate-300 text-[#006633] focus:ring-[#006633] dark:border-slate-700"
                 />
                 <span className="text-sm">
-                  <span className="font-medium text-slate-800">{option.label}</span>
-                  <span className="mt-0.5 block text-xs text-slate-500">{option.hint}</span>
+                  <span className="font-medium text-slate-800 dark:text-slate-100">{option.label}</span>
+                  <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">{option.hint}</span>
                 </span>
               </label>
             );
           })}
         </fieldset>
 
-        <div className="flex items-center justify-end gap-3 border-t border-slate-100 pt-4">
+        <div className="flex items-center justify-end gap-3 border-t border-slate-100 pt-4 dark:border-slate-800">
           <button
             type="button"
             onClick={() => navigate(-1)}
             disabled={submitting}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium hover:bg-slate-50"
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium hover:bg-slate-50 dark:border-slate-700"
           >
             Cancel
           </button>

@@ -117,7 +117,7 @@ export default function PortalSettings() {
               type="checkbox"
               checked={form.restrictSignupDomains}
               onChange={(e) => update('restrictSignupDomains', e.target.checked)}
-              className="mt-0.5 rounded border-slate-300"
+              className="mt-0.5 rounded border-slate-300 dark:border-slate-700"
             />
             <span className="text-sm text-slate-700 dark:text-slate-300">
               Restrict signup to specific email domains
@@ -153,7 +153,7 @@ export default function PortalSettings() {
                   type="checkbox"
                   checked={form.allowSubdomains}
                   onChange={(e) => update('allowSubdomains', e.target.checked)}
-                  className="mt-0.5 rounded border-slate-300"
+                  className="mt-0.5 rounded border-slate-300 dark:border-slate-700"
                 />
                 <span className="text-sm text-slate-700 dark:text-slate-300">
                   Allow subdomains
@@ -194,7 +194,7 @@ export default function PortalSettings() {
               type="checkbox"
               checked={form.maintenanceMode}
               onChange={(e) => update('maintenanceMode', e.target.checked)}
-              className="mt-0.5 rounded border-slate-300"
+              className="mt-0.5 rounded border-slate-300 dark:border-slate-700"
             />
             <span className="text-sm text-slate-700 dark:text-slate-300">
               Pause new submissions and comments

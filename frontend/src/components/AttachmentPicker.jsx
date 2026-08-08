@@ -50,8 +50,8 @@ export default function AttachmentPicker({ files, onChange, disabled }) {
 
   return (
     <div>
-      <span className="mb-1 block text-sm font-medium text-slate-700">
-        Photos <span className="font-normal text-slate-400">(optional)</span>
+      <span className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
+        Photos <span className="font-normal text-slate-400 dark:text-slate-500">(optional)</span>
       </span>
 
       <input
@@ -83,7 +83,7 @@ export default function AttachmentPicker({ files, onChange, disabled }) {
       </label>
 
       {error && (
-        <p role="alert" className="mt-2 text-xs text-red-600">
+        <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">
           {error}
         </p>
       )}
@@ -92,7 +92,7 @@ export default function AttachmentPicker({ files, onChange, disabled }) {
         <ul className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
           {files.map((file, index) => (
             <li key={`${file.name}-${index}`} className="group relative">
-              <div className="aspect-square overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
+              <div className="aspect-square overflow-hidden rounded-lg border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-800">
                 {previews[index] ? (
                   <img
                     src={previews[index]}
@@ -100,7 +100,7 @@ export default function AttachmentPicker({ files, onChange, disabled }) {
                     className="h-full w-full object-cover"
                   />
                 ) : (
-                  <ImageIcon className="m-auto text-slate-300" />
+                  <ImageIcon className="m-auto text-slate-300 dark:text-slate-600" />
                 )}
               </div>
 
@@ -109,12 +109,12 @@ export default function AttachmentPicker({ files, onChange, disabled }) {
                 onClick={() => remove(index)}
                 disabled={disabled}
                 aria-label={`Remove ${file.name}`}
-                className="absolute -right-2 -top-2 rounded-full bg-white p-1 text-slate-500 shadow ring-1 ring-slate-200 hover:text-red-600"
+                className="absolute -right-2 -top-2 rounded-full bg-white p-1 text-slate-500 shadow ring-1 ring-slate-200 hover:text-red-600 dark:bg-slate-900 dark:text-slate-400"
               >
                 <X size={14} />
               </button>
 
-              <p className="mt-1 truncate text-xs text-slate-500">{formatBytes(file.size)}</p>
+              <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{formatBytes(file.size)}</p>
             </li>
           ))}
         </ul>

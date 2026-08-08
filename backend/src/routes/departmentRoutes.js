@@ -13,6 +13,7 @@ import { ApiError } from '../utils/ApiError.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
+import { TICKET_CATEGORIES } from '../validators/ticketSchemas.js';
 import { z } from 'zod';
 
 const router = express.Router();
@@ -27,6 +28,10 @@ const departmentSchema = z.object({
     .regex(/^[a-z0-9-]+$/, 'Slug may only contain lowercase letters, numbers and hyphens.'),
   description: z.string().trim().max(500).optional(),
   isActive: z.boolean().default(true),
+
+  /// Drives the ticket's category when a student picks this department,
+  /// so the submission form only has to ask one question.
+  category: z.enum(TICKET_CATEGORIES).default('OTHER'),
 });
 
 const updateDepartmentSchema = departmentSchema.partial().refine(
@@ -49,6 +54,9 @@ router.get(
         slug: true,
         description: true,
         isActive: true,
+        // Sent to the client so the form can show what a choice implies,
+        // and so staff tooling doesn't need a second lookup.
+        category: true,
         _count: { select: { tickets: true } },
       },
     });

@@ -5,7 +5,7 @@
  * matching routes are guarded and the API re-checks on every request.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -17,6 +17,11 @@ import {
   LogOut,
   Menu,
   X,
+  BarChart3,
+  Users,
+  Settings,
+  ShieldAlert,
+  ChevronDown,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { adminApi } from '../lib/api.js';
@@ -31,11 +36,102 @@ const NAV = [
   { to: '/tickets', label: 'Issues', icon: ListChecks, access: 'public' },
   { to: '/announcements', label: 'News', icon: Megaphone, access: 'public' },
   { to: '/tickets/new', label: 'Report', icon: PlusCircle, access: 'auth' },
-  { to: '/admin', label: 'Admin', icon: Shield, access: 'staff' },
 ];
 
+/**
+ * Admin pages live behind a dropdown rather than in the main bar.
+ *
+ * They were previously routed but linked from nowhere, which made
+ * analytics, user management and the maintenance toggle reachable only
+ * by typing the URL. Grouping them keeps the top bar short while still
+ * surfacing them.
+ */
+const ADMIN_NAV = [
+  { to: '/admin', label: 'Overview', icon: Shield, access: 'staff' },
+  { to: '/admin/analytics', label: 'Analytics', icon: BarChart3, access: 'staff' },
+  { to: '/admin/users', label: 'Users', icon: Users, access: 'staff' },
+  { to: '/admin/moderation', label: 'Moderation', icon: ShieldAlert, access: 'admin' },
+  { to: '/admin/settings', label: 'Portal settings', icon: Settings, access: 'superadmin' },
+];
+
+const linkClass = ({ isActive }) =>
+  `flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+    isActive ? 'bg-white/15 text-white' : 'text-white/75 hover:bg-white/10 hover:text-white'
+  }`;
+
+/** Desktop-only dropdown grouping the admin pages. */
+function AdminMenu({ items }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  // Close on outside click and on Escape, so the panel can't be left
+  // hanging over the page after navigating away with the keyboard.
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const onPointerDown = (event) => {
+      if (ref.current && !ref.current.contains(event.target)) setOpen(false);
+    };
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  if (items.length === 0) return null;
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white/75 transition-colors hover:bg-white/10 hover:text-white"
+      >
+        <Shield size={16} />
+        Admin
+        <ChevronDown size={14} className={open ? 'rotate-180 transition-transform' : 'transition-transform'} />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 z-50 mt-1 w-52 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900"
+        >
+          {items.map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={to === '/admin'}
+              role="menuitem"
+              onClick={() => setOpen(false)}
+              className={({ isActive }) =>
+                `flex items-center gap-2 px-3 py-2 text-sm transition-colors ${
+                  isActive
+                    ? 'bg-slate-100 font-medium text-slate-900 dark:bg-slate-800 dark:text-white'
+                    : 'text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800'
+                }`
+              }
+            >
+              <Icon size={16} />
+              {label}
+            </NavLink>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Layout() {
-  const { isAuthenticated, isStaff, profile, signOut } = useAuth();
+  const { isAuthenticated, isStaff, isAdmin, isSuperAdmin, profile, signOut } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [maintenance, setMaintenance] = useState(null);
@@ -62,15 +158,18 @@ export default function Layout() {
     return false;
   });
 
+  // Portal settings can lock everyone out, so it stays SUPER_ADMIN-only —
+  // matching RequireSuperAdmin on the route itself.
+  const adminLinks = ADMIN_NAV.filter((item) => {
+    if (item.access === 'superadmin') return isSuperAdmin;
+    if (item.access === 'admin') return isAdmin;
+    return isStaff;
+  });
+
   const handleSignOut = async () => {
     await signOut();
     navigate('/');
   };
-
-  const linkClass = ({ isActive }) =>
-    `flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-      isActive ? 'bg-white/15 text-white' : 'text-white/75 hover:bg-white/10 hover:text-white'
-    }`;
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50 dark:bg-slate-950">
@@ -96,6 +195,7 @@ export default function Layout() {
                 {label}
               </NavLink>
             ))}
+            <AdminMenu items={adminLinks} />
           </nav>
 
           <div className="hidden items-center gap-2 md:flex">
@@ -168,6 +268,26 @@ export default function Layout() {
                   {label}
                 </NavLink>
               ))}
+
+              {adminLinks.length > 0 && (
+                <div className="mt-2 border-t border-white/10 pt-2">
+                  <p className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-white/50">
+                    Admin
+                  </p>
+                  {adminLinks.map(({ to, label, icon: Icon }) => (
+                    <NavLink
+                      key={to}
+                      to={to}
+                      end={to === '/admin'}
+                      className={linkClass}
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      <Icon size={16} />
+                      {label}
+                    </NavLink>
+                  ))}
+                </div>
+              )}
 
               <div className="mt-2 flex justify-center border-t border-white/10 pt-3">
                 <ThemeToggle />

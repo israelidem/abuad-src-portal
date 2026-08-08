@@ -41,10 +41,10 @@ export default function ForgotPassword() {
   if (sent) {
     return (
       <div className="mx-auto max-w-md py-8">
-        <div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-          <CheckCircle size={40} className="mx-auto mb-4 text-green-600" />
-          <h1 className="mb-2 text-xl font-semibold text-slate-900">Check your inbox</h1>
-          <p className="mb-6 text-sm text-slate-600">
+        <div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <CheckCircle size={40} className="mx-auto mb-4 text-green-600 dark:text-green-400" />
+          <h1 className="mb-2 text-xl font-semibold text-slate-900 dark:text-white">Check your inbox</h1>
+          <p className="mb-6 text-sm text-slate-600 dark:text-slate-400">
             If an account exists for <span className="font-medium">{email}</span>, we&apos;ve sent a
             link to reset your password. It expires in one hour.
           </p>
@@ -61,17 +61,17 @@ export default function ForgotPassword() {
 
   return (
     <div className="mx-auto max-w-md py-8">
-      <div className="rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
+      <div className="rounded-xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <Mail size={32} className="mb-4 text-[#006633]" aria-hidden="true" />
-        <h1 className="mb-1 text-2xl font-semibold text-slate-900">Reset your password</h1>
-        <p className="mb-6 text-sm text-slate-600">
+        <h1 className="mb-1 text-2xl font-semibold text-slate-900 dark:text-white">Reset your password</h1>
+        <p className="mb-6 text-sm text-slate-600 dark:text-slate-400">
           Enter your email address and we&apos;ll send you a link to set a new one.
         </p>
 
         {error && (
           <div
             role="alert"
-            className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+            className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300"
           >
             <AlertCircle size={16} className="mt-0.5 shrink-0" />
             <span>{error}</span>
@@ -80,7 +80,7 @@ export default function ForgotPassword() {
 
         <form onSubmit={handleSubmit} className="space-y-4" noValidate>
           <div>
-            <label htmlFor="email" className="mb-1 block text-sm font-medium text-slate-700">
+            <label htmlFor="email" className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
               Email address
             </label>
             <input
@@ -92,7 +92,7 @@ export default function ForgotPassword() {
               autoFocus
               autoComplete="email"
               placeholder="you@abuad.edu.ng"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-[#006633] focus:outline-none focus:ring-1 focus:ring-[#006633]"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-[#006633] focus:outline-none focus:ring-1 focus:ring-[#006633] dark:border-slate-700"
             />
           </div>
 
@@ -106,7 +106,7 @@ export default function ForgotPassword() {
           </button>
         </form>
 
-        <p className="mt-6 text-center text-sm text-slate-600">
+        <p className="mt-6 text-center text-sm text-slate-600 dark:text-slate-400">
           Remembered it?{' '}
           <Link to="/login" className="font-medium text-[#006633] hover:underline">
             Sign in

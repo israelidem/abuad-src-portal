@@ -123,9 +123,9 @@ export default function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
-          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5">
-            <h2 className="text-sm font-semibold text-slate-900">Notifications</h2>
+        <div className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5 dark:border-slate-800">
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Notifications</h2>
             {unread > 0 && (
               <button
                 type="button"
@@ -139,11 +139,11 @@ export default function NotificationBell() {
           </div>
 
           {items.length === 0 ? (
-            <p className="px-4 py-8 text-center text-sm text-slate-500">
+            <p className="px-4 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
               Nothing yet. Updates on your reports will show up here.
             </p>
           ) : (
-            <ul className="max-h-80 divide-y divide-slate-100 overflow-y-auto">
+            <ul className="max-h-80 divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
               {items.map((n) => (
                 <li key={n.id}>
                   <Link
@@ -153,7 +153,7 @@ export default function NotificationBell() {
                       n.isRead ? '' : 'bg-[#006633]/5'
                     }`}
                   >
-                    <p className="flex items-start gap-2 text-sm font-medium text-slate-900">
+                    <p className="flex items-start gap-2 text-sm font-medium text-slate-900 dark:text-white">
                       {!n.isRead && (
                         <span
                           className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#006633]"
@@ -162,8 +162,8 @@ export default function NotificationBell() {
                       )}
                       {n.title}
                     </p>
-                    <p className="mt-0.5 line-clamp-2 text-xs text-slate-600">{n.body}</p>
-                    <p className="mt-1 text-[11px] text-slate-400">{timeAgo(n.createdAt)}</p>
+                    <p className="mt-0.5 line-clamp-2 text-xs text-slate-600 dark:text-slate-400">{n.body}</p>
+                    <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">{timeAgo(n.createdAt)}</p>
                   </Link>
                 </li>
               ))}

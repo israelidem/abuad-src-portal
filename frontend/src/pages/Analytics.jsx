@@ -12,6 +12,9 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Legend,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -28,6 +31,11 @@ import { Spinner } from '../components/Spinner.jsx';
 const WINDOWS = [7, 30, 90, 365];
 
 const SLICE_COLOURS = ['#006633', '#0ea5e9', '#f59e0b', '#8b5cf6', '#ef4444', '#64748b'];
+
+// Fixed severity order — sorting by count would put CRITICAL last on a
+// good week, which is the one row that should never be hard to find.
+const URGENCY_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
+const URGENCY_COLOURS = ['#ef4444', '#f59e0b', '#0ea5e9', '#64748b'];
 
 function Stat({ label, value, hint }) {
   return (
@@ -91,6 +99,22 @@ export default function Analytics() {
     value,
   }));
 
+  // Urgency was already returned by the API but never displayed, so the
+  // one breakdown that tells staff what to do *first* was invisible.
+  const urgencyData = URGENCY_ORDER.filter((key) => data.tickets.byUrgency[key]).map((key) => ({
+    name: key.charAt(0) + key.slice(1).toLowerCase(),
+    value: data.tickets.byUrgency[key],
+  }));
+
+  // "12 Mar" reads better on an axis than "2026-03-12".
+  const trendData = (data.trend ?? []).map((point) => ({
+    ...point,
+    label: new Date(point.date).toLocaleDateString(undefined, {
+      day: 'numeric',
+      month: 'short',
+    }),
+  }));
+
   const { performance, satisfaction } = data;
 
   return (
@@ -144,6 +168,47 @@ export default function Analytics() {
           }`}
         />
       </div>
+
+      {trendData.length > 1 && (
+        <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+          <h2 className="mb-1 font-semibold text-slate-900 dark:text-white">
+            Submitted vs resolved
+          </h2>
+          <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
+            {/* The gap between the lines is the point: resolved trailing
+                submitted means the backlog is growing. */}
+            Per {data.trendGranularity === 'week' ? 'week' : 'day'}. When the resolved line
+            sits below submitted, the backlog is growing.
+          </p>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={trendData}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.3} />
+                <XAxis dataKey="label" tick={{ fontSize: 11 }} minTickGap={24} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                <Tooltip cursor={{ opacity: 0.1 }} />
+                <Legend />
+                <Line
+                  type="monotone"
+                  dataKey="created"
+                  name="Submitted"
+                  stroke="#0ea5e9"
+                  strokeWidth={2}
+                  dot={false}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="resolved"
+                  name="Resolved"
+                  stroke="#006633"
+                  strokeWidth={2}
+                  dot={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+      )}
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
@@ -202,24 +267,61 @@ export default function Analytics() {
         </section>
       </div>
 
-      {data.topDepartments.length > 0 && (
-        <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="mb-4 font-semibold text-slate-900 dark:text-white">
-            Busiest departments
-          </h2>
-          <ul className="space-y-2">
-            {data.topDepartments.map((dept) => (
-              <li
-                key={dept.id}
-                className="flex items-center justify-between text-sm text-slate-700 dark:text-slate-300"
-              >
-                <span>{dept.name}</span>
-                <span className="font-medium">{dept.ticketCount}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        {urgencyData.length > 0 && (
+          <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+            <h2 className="mb-4 font-semibold text-slate-900 dark:text-white">
+              Reports by urgency ({days}d)
+            </h2>
+            <ul className="space-y-3">
+              {urgencyData.map((entry, i) => {
+                const max = Math.max(...urgencyData.map((u) => u.value));
+                return (
+                  <li key={entry.name}>
+                    <div className="mb-1 flex items-center justify-between text-sm text-slate-700 dark:text-slate-300">
+                      <span>{entry.name}</span>
+                      <span className="font-medium">{entry.value}</span>
+                    </div>
+                    {/* A plain proportional bar — a second chart library
+                        canvas here would cost more than it explains. */}
+                    <div
+                      className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"
+                      role="presentation"
+                    >
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${max ? (entry.value / max) * 100 : 0}%`,
+                          backgroundColor: URGENCY_COLOURS[i % URGENCY_COLOURS.length],
+                        }}
+                      />
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
+
+        {data.topDepartments.length > 0 && (
+          <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+            <h2 className="mb-4 font-semibold text-slate-900 dark:text-white">
+              Busiest departments
+            </h2>
+            <ul className="space-y-2">
+              {data.topDepartments.map((dept) => (
+                <li
+                  key={dept.id}
+                  className="flex items-center justify-between text-sm text-slate-700 dark:text-slate-300"
+                >
+                  <span>{dept.name}</span>
+                  <span className="font-medium">{dept.ticketCount}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
     </div>
   );
 }

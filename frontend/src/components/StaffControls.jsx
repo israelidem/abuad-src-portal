@@ -112,14 +112,14 @@ export default function StaffControls({ ticket, onUpdated }) {
 
   return (
     <section className="mt-6 rounded-xl border-2 border-[#006633]/20 bg-[#006633]/[0.03] p-6">
-      <h2 className="mb-4 flex items-center gap-2 font-semibold text-slate-900">
+      <h2 className="mb-4 flex items-center gap-2 font-semibold text-slate-900 dark:text-white">
         <Settings size={18} className="text-[#006633]" />
         Representative controls
       </h2>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <label htmlFor="staff-status" className="mb-1 block text-sm font-medium text-slate-700">
+          <label htmlFor="staff-status" className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
             Status
           </label>
           <select
@@ -137,7 +137,7 @@ export default function StaffControls({ ticket, onUpdated }) {
         </div>
 
         <div>
-          <label htmlFor="staff-dept" className="mb-1 block text-sm font-medium text-slate-700">
+          <label htmlFor="staff-dept" className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
             Department
           </label>
           <select
@@ -158,8 +158,8 @@ export default function StaffControls({ ticket, onUpdated }) {
 
       {statusChanged && (
         <div className="mt-4">
-          <label htmlFor="staff-note" className="mb-1 block text-sm font-medium text-slate-700">
-            Note <span className="font-normal text-slate-400">(shown to the reporter)</span>
+          <label htmlFor="staff-note" className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
+            Note <span className="font-normal text-slate-400 dark:text-slate-500">(shown to the reporter)</span>
           </label>
           <textarea
             id="staff-note"
@@ -190,14 +190,14 @@ export default function StaffControls({ ticket, onUpdated }) {
             type="button"
             onClick={handleAssignToMe}
             disabled={saving}
-            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900"
           >
             Assign to me
           </button>
         )}
 
         {ticket.assignedToId === user?.id && (
-          <span className="text-sm text-slate-500">Assigned to you</span>
+          <span className="text-sm text-slate-500 dark:text-slate-400">Assigned to you</span>
         )}
       </div>
     </section>

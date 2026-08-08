@@ -61,31 +61,31 @@ export default function Profile() {
 
   return (
     <div className="mx-auto max-w-xl py-4">
-      <h1 className="mb-1 text-2xl font-semibold text-slate-900">Your profile</h1>
-      <p className="mb-6 text-sm text-slate-600">
+      <h1 className="mb-1 text-2xl font-semibold text-slate-900 dark:text-white">Your profile</h1>
+      <p className="mb-6 text-sm text-slate-600 dark:text-slate-400">
         Keeping this current helps the SRC route your reports correctly.
       </p>
 
-      <div className="mb-4 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
-        <p className="flex items-center gap-2 text-slate-600">
-          <Mail size={15} className="text-slate-400" />
+      <div className="mb-4 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm dark:border-slate-800 dark:bg-slate-900">
+        <p className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
+          <Mail size={15} className="text-slate-400 dark:text-slate-500" />
           {user?.email}
-          <span className="text-xs text-slate-400">(cannot be changed here)</span>
+          <span className="text-xs text-slate-400 dark:text-slate-500">(cannot be changed here)</span>
         </p>
-        <p className="flex items-center gap-2 text-slate-600">
-          <Shield size={15} className="text-slate-400" />
+        <p className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
+          <Shield size={15} className="text-slate-400 dark:text-slate-500" />
           {ROLE_LABELS[profile?.role] ?? profile?.role}
         </p>
       </div>
 
       <form
         onSubmit={handleSubmit}
-        className="space-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
+        className="space-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"
         noValidate
       >
         {FIELDS.map(({ name, label, required }) => (
           <div key={name}>
-            <label htmlFor={name} className="mb-1 block text-sm font-medium text-slate-700">
+            <label htmlFor={name} className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
               {label}
               {required && <span className="text-red-500"> *</span>}
             </label>
@@ -103,12 +103,12 @@ export default function Profile() {
               }`}
             />
             {fieldErrors[name] && (
-              <p className="mt-1 text-xs text-red-600">{fieldErrors[name]}</p>
+              <p className="mt-1 text-xs text-red-600 dark:text-red-400">{fieldErrors[name]}</p>
             )}
           </div>
         ))}
 
-        <div className="flex justify-end border-t border-slate-100 pt-4">
+        <div className="flex justify-end border-t border-slate-100 pt-4 dark:border-slate-800">
           <button
             type="submit"
             disabled={saving}

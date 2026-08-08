@@ -40,8 +40,8 @@ export default function Dashboard() {
     <div>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Welcome back, {firstName}</h1>
-          <p className="mt-1 text-sm text-slate-600">Here&apos;s what you&apos;ve reported.</p>
+          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Welcome back, {firstName}</h1>
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">Here&apos;s what you&apos;ve reported.</p>
         </div>
         <Link
           to="/tickets/new"
@@ -54,14 +54,14 @@ export default function Dashboard() {
 
       <dl className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
         {tiles.map(([label, value, colour]) => (
-          <div key={label} className="rounded-xl border border-slate-200 bg-white p-5">
+          <div key={label} className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
             <dd className={`text-2xl font-bold ${colour}`}>{value}</dd>
-            <dt className="mt-1 text-xs text-slate-500">{label}</dt>
+            <dt className="mt-1 text-xs text-slate-500 dark:text-slate-400">{label}</dt>
           </div>
         ))}
       </dl>
 
-      <h2 className="mb-4 font-semibold text-slate-900">Your recent issues</h2>
+      <h2 className="mb-4 font-semibold text-slate-900 dark:text-white">Your recent issues</h2>
 
       {loading ? (
         <div className="space-y-4">
@@ -70,10 +70,10 @@ export default function Dashboard() {
           ))}
         </div>
       ) : tickets.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-white py-14 text-center">
-          <Inbox size={36} className="mx-auto mb-3 text-slate-300" aria-hidden="true" />
-          <h3 className="mb-1 font-medium text-slate-900">Nothing reported yet</h3>
-          <p className="mx-auto mb-5 max-w-sm text-sm text-slate-600">
+        <div className="rounded-xl border border-dashed border-slate-300 bg-white py-14 text-center dark:border-slate-700 dark:bg-slate-900">
+          <Inbox size={36} className="mx-auto mb-3 text-slate-300 dark:text-slate-600" aria-hidden="true" />
+          <h3 className="mb-1 font-medium text-slate-900 dark:text-white">Nothing reported yet</h3>
+          <p className="mx-auto mb-5 max-w-sm text-sm text-slate-600 dark:text-slate-400">
             Spotted a problem on campus? Let the SRC know.
           </p>
           <Link

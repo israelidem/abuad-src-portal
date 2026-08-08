@@ -189,6 +189,13 @@ export const announcementApi = {
 export const adminApi = {
   analytics: (days, options) => api.get('/api/admin/analytics', { ...options, params: { days } }),
 
+  /// Flagged tickets awaiting an admin decision.
+  moderation: (options) => api.get('/api/admin/moderation', options),
+
+  /// Breaks anonymity for one ticket. Requires a reason and is audited
+  /// server-side, so this is deliberately not a plain GET.
+  revealAuthor: (id, reason) => api.post(`/api/admin/tickets/${id}/reveal`, { reason }),
+
   users: (params, options) => api.get('/api/admin/users', { ...options, params }),
   setUserRole: (id, role) => api.patch(`/api/admin/users/${id}/role`, { role }),
   setUserStatus: (id, isActive) => api.patch(`/api/admin/users/${id}/status`, { isActive }),

@@ -46,15 +46,15 @@ export default function Login() {
 
   return (
     <div className="mx-auto max-w-md py-8">
-      <div className="rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
+      <div className="rounded-xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <Logo size="lg" onLight className="mx-auto mb-4" />
-        <h1 className="mb-1 text-2xl font-semibold text-slate-900">Welcome back</h1>
-        <p className="mb-6 text-sm text-slate-600">Sign in to track and report campus issues.</p>
+        <h1 className="mb-1 text-2xl font-semibold text-slate-900 dark:text-white">Welcome back</h1>
+        <p className="mb-6 text-sm text-slate-600 dark:text-slate-400">Sign in to track and report campus issues.</p>
 
         {error && (
           <div
             role="alert"
-            className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+            className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300"
           >
             <AlertCircle size={16} className="mt-0.5 shrink-0" />
             <span>{error}</span>
@@ -63,7 +63,7 @@ export default function Login() {
 
         <form onSubmit={handleSubmit} className="space-y-4" noValidate>
           <div>
-            <label htmlFor="email" className="mb-1 block text-sm font-medium text-slate-700">
+            <label htmlFor="email" className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
               Email address
             </label>
             <input
@@ -75,12 +75,12 @@ export default function Login() {
               autoComplete="email"
               autoFocus
               placeholder="you@abuad.edu.ng"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-[#006633] focus:outline-none focus:ring-1 focus:ring-[#006633]"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-[#006633] focus:outline-none focus:ring-1 focus:ring-[#006633] dark:border-slate-700"
             />
           </div>
 
           <div>
-            <label htmlFor="password" className="mb-1 block text-sm font-medium text-slate-700">
+            <label htmlFor="password" className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
               Password
             </label>
             <div className="relative">
@@ -91,12 +91,12 @@ export default function Login() {
                 onChange={update('password')}
                 required
                 autoComplete="current-password"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 pr-10 text-sm focus:border-[#006633] focus:outline-none focus:ring-1 focus:ring-[#006633]"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 pr-10 text-sm focus:border-[#006633] focus:outline-none focus:ring-1 focus:ring-[#006633] dark:border-slate-700"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword((v) => !v)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600"
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:text-slate-500"
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
               >
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -120,7 +120,7 @@ export default function Login() {
           </button>
         </form>
 
-        <p className="mt-6 text-center text-sm text-slate-600">
+        <p className="mt-6 text-center text-sm text-slate-600 dark:text-slate-400">
           Don&apos;t have an account?{' '}
           <Link to="/signup" className="font-medium text-[#006633] hover:underline">
             Create one

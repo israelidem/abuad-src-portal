@@ -18,7 +18,7 @@ export default function NotificationSettings() {
   if (!supported) return null;
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-6">
+    <section className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-start gap-3">
         <span
           className={`mt-0.5 rounded-lg p-2 ${
@@ -30,14 +30,14 @@ export default function NotificationSettings() {
         </span>
 
         <div className="min-w-0 flex-1">
-          <h2 className="font-semibold text-slate-900">Push notifications</h2>
-          <p className="mt-0.5 text-sm text-slate-600">
+          <h2 className="font-semibold text-slate-900 dark:text-white">Push notifications</h2>
+          <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">
             Get an alert when your report changes status or someone replies — even when the
             portal is closed.
           </p>
 
           {blocked && (
-            <p className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+            <p className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
               <AlertCircle size={15} className="mt-0.5 shrink-0" />
               {/* Permission can't be re-requested from script once denied,
                   so pointing at browser settings is the only honest advice. */}
@@ -47,7 +47,7 @@ export default function NotificationSettings() {
           )}
 
           {error && !blocked && (
-            <p role="alert" className="mt-3 text-sm text-red-600">
+            <p role="alert" className="mt-3 text-sm text-red-600 dark:text-red-400">
               {error}
             </p>
           )}

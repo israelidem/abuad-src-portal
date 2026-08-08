@@ -92,3 +92,41 @@ export async function notify(userId, { type, title, body, link, tag }) {
 
   return notification;
 }
+
+/** How many users get pushed to at once. */
+const PUSH_CHUNK = 50;
+
+/**
+ * Same as `notify`, but for a broadcast to many users at once.
+ *
+ * Calling `notify` in a loop would issue one INSERT per student and open
+ * as many concurrent push connections as there are recipients — enough to
+ * stall the request on a campus-sized audience. Here the rows go in with
+ * a single `createMany`, and pushes fan out in fixed-size chunks.
+ *
+ * Returns once the rows are written. Push delivery continues in the
+ * background: the bell is the source of truth, so a push that fails (or
+ * a student with no subscription) must never fail the caller.
+ */
+export async function notifyMany(userIds, { type, title, body, link, tag }) {
+  const unique = [...new Set(userIds.filter(Boolean))];
+  if (unique.length === 0) return { created: 0 };
+
+  const { count } = await prisma.notification.createMany({
+    data: unique.map((userId) => ({ userId, type, title, body, link })),
+  });
+
+  // Deliberately not awaited — see the note above.
+  (async () => {
+    for (let i = 0; i < unique.length; i += PUSH_CHUNK) {
+      const chunk = unique.slice(i, i + PUSH_CHUNK);
+      await Promise.allSettled(chunk.map((id) => sendToUser(id, { title, body, link, tag })));
+    }
+  })().catch((error) => {
+    console.warn('[push] broadcast failed:', error.message);
+  });
+
+  return { created: count };
+}
+
+

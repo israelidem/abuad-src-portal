@@ -20,9 +20,9 @@ export const useToast = () => {
 };
 
 const VARIANTS = {
-  success: { icon: CheckCircle, className: 'border-green-200 bg-green-50 text-green-900' },
-  error: { icon: AlertCircle, className: 'border-red-200 bg-red-50 text-red-900' },
-  info: { icon: Info, className: 'border-blue-200 bg-blue-50 text-blue-900' },
+  success: { icon: CheckCircle, className: 'border-green-200 bg-green-50 text-green-900 dark:border-green-200/20 dark:bg-green-950/40' },
+  error: { icon: AlertCircle, className: 'border-red-200 bg-red-50 text-red-900 dark:border-red-900/50 dark:bg-red-950/40' },
+  info: { icon: Info, className: 'border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/40' },
 };
 
 export function ToastProvider({ children }) {

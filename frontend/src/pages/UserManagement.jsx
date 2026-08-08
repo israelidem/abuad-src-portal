@@ -195,7 +195,7 @@ export default function UserManagement() {
                         {user.isActive ? 'Deactivate' : 'Reactivate'}
                       </button>
                     ) : (
-                      <span className="text-xs text-slate-400">
+                      <span className="text-xs text-slate-400 dark:text-slate-500">
                         {user.id === profile?.id ? 'You' : '—'}
                       </span>
                     )}
@@ -205,7 +205,7 @@ export default function UserManagement() {
 
               {users.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-10 text-center text-slate-500">
+                  <td colSpan={4} className="px-4 py-10 text-center text-slate-500 dark:text-slate-400">
                     No users matched that search.
                   </td>
                 </tr>

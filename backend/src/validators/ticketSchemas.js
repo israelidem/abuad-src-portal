@@ -39,9 +39,19 @@ export const createTicketSchema = z.object({
     .min(2, 'Faculty is required.')
     .max(120, 'Faculty name is too long.'),
 
-  category: z.enum(TICKET_CATEGORIES, {
-    errorMap: () => ({ message: `Category must be one of: ${TICKET_CATEGORIES.join(', ')}` }),
-  }),
+  /**
+   * Optional as of Phase 5. Students used to answer two near-identical
+   * questions — "category" and "which department?" — so the form now
+   * asks only for the department and the API derives the category from
+   * it. Still accepted directly for older clients and for staff, who do
+   * think in categories; see the refine below for the "at least one"
+   * rule.
+   */
+  category: z
+    .enum(TICKET_CATEGORIES, {
+      errorMap: () => ({ message: `Category must be one of: ${TICKET_CATEGORIES.join(', ')}` }),
+    })
+    .optional(),
 
   description: z
     .string()
@@ -86,7 +96,14 @@ export const createTicketSchema = z.object({
     )
     .max(5, 'A maximum of 5 attachments is allowed.')
     .optional(),
-});
+})
+  // One of the two must be present. The service prefers `departmentId`
+  // and derives the category from it; an explicit `category` with no
+  // department still works for older clients.
+  .refine((data) => Boolean(data.category || data.departmentId), {
+    message: 'Choose which department should handle this.',
+    path: ['departmentId'],
+  });
 
 /**
  * Students may correct details, but only while the ticket is still PENDING.

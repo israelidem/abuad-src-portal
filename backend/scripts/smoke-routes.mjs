@@ -45,6 +45,17 @@ const cases = [
     expect: [200],
     note: 'vapid key endpoint public and degrades without keys',
   },
+  {
+    path: '/api/admin/moderation',
+    expect: [401],
+    note: 'moderation queue mounted, auth enforced',
+  },
+  {
+    // Reveal is a POST; a GET must not quietly fall through to a 200.
+    path: '/api/admin/tickets/00000000-0000-0000-0000-000000000000/reveal',
+    expect: [404],
+    note: 'author reveal is POST-only (GET does not expose it)',
+  },
 ];
 
 let failures = 0;

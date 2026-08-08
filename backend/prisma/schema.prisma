@@ -115,10 +115,20 @@ model Profile {
   pollVotes         PollVote[]
   savedViews        SavedView[]
   auditLogs         AuditLog[]
+
   settingsUpdates   AppSettings[]
+
+  /// Which SRC desk this rep/admin staffs — deliberately *not* the
+  /// `department` field above, which is the student's own academic
+  /// department as free text. Null for students and for staff who handle
+  /// everything. SetNull rather than Cascade: removing a department must
+  /// not delete the people who worked at it.
+  srcDepartmentId String?     @map("department_id") @db.Uuid
+  srcDepartment   Department? @relation("DepartmentStaff", fields: [srcDepartmentId], references: [id], onDelete: SetNull)
 
   @@index([role])
   @@index([isActive])
+  @@index([srcDepartmentId])
   @@map("profiles")
 }
 
@@ -131,7 +141,16 @@ model Department {
   isActive    Boolean  @default(true) @map("is_active")
   createdAt   DateTime @default(now()) @map("created_at")
 
+  /// Lets one dropdown answer two questions. Students used to pick both a
+  /// category and a department — near-duplicate lists — so the form now
+  /// asks only for the department and the API derives the category from
+  /// here. Keeps category-based reporting working, and a new desk can be
+  /// added from the database without touching the enum.
+  category TicketCategory @default(OTHER)
+
   tickets Ticket[]
+  /// Reps and admins who staff this desk.
+  staff   Profile[] @relation("DepartmentStaff")
 
   @@map("departments")
 }

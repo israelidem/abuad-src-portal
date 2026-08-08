@@ -346,6 +346,70 @@ router.get(
     const toMap = (rows, key) =>
       Object.fromEntries(rows.map((r) => [r[key], r._count]));
 
+    /**
+     * Daily submitted vs resolved.
+     *
+     * The totals above say how big the pile is; this says whether it is
+     * growing. Bucketed in Postgres via date_trunc rather than pulling
+     * every row back and grouping in JS — Prisma's groupBy cannot express
+     * a truncated date, so this is raw SQL by necessity.
+     *
+     * Days with no activity are absent from both result sets, so the
+     * series is padded below: a gap in a line chart reads as missing
+     * data, while a zero is the actual answer.
+     */
+    const [createdRows, resolvedRows] = await Promise.all([
+      prisma.$queryRaw`
+        SELECT date_trunc('day', created_at)::date AS day, COUNT(*)::int AS count
+        FROM public.tickets
+        WHERE created_at >= ${since}
+        GROUP BY 1
+        ORDER BY 1
+      `,
+      prisma.$queryRaw`
+        SELECT date_trunc('day', resolved_at)::date AS day, COUNT(*)::int AS count
+        FROM public.tickets
+        WHERE resolved_at IS NOT NULL AND resolved_at >= ${since}
+        GROUP BY 1
+        ORDER BY 1
+      `,
+    ]);
+
+    const isoDay = (value) => new Date(value).toISOString().slice(0, 10);
+    const createdByDay = new Map(createdRows.map((r) => [isoDay(r.day), r.count]));
+    const resolvedByDay = new Map(resolvedRows.map((r) => [isoDay(r.day), r.count]));
+
+    // A year of daily points is unreadable on a phone, so long windows
+    // are reported weekly instead.
+    const step = days > 90 ? 7 : 1;
+    const trend = [];
+
+    // Buckets are anchored at today and walk backwards, so when `days`
+    // isn't a whole number of weeks the short bucket lands on the oldest
+    // point. A short bucket at the newest end would draw a dip that
+    // never happened — the very thing this chart is read for.
+    for (let offset = 0; offset < days; offset += step) {
+      const end = Math.min(offset + step, days);
+
+      let created = 0;
+      let closed = 0;
+      for (let i = offset; i < end; i += 1) {
+        const day = isoDay(Date.now() - i * 86_400_000);
+        created += createdByDay.get(day) ?? 0;
+        closed += resolvedByDay.get(day) ?? 0;
+      }
+
+      // Labelled with the bucket's oldest day, so a weekly point reads
+      // as "the week beginning...".
+      trend.push({
+        date: isoDay(Date.now() - (end - 1) * 86_400_000),
+        created,
+        resolved: closed,
+      });
+    }
+
+    trend.reverse(); // oldest first, the direction a chart is read
+
     res.json({
       windowDays: days,
       tickets: {
@@ -371,7 +435,114 @@ router.get(
         name: nameById.get(d.departmentId) ?? 'Unknown',
         ticketCount: d._count,
       })),
+      trend,
+      trendGranularity: step === 1 ? 'day' : 'week',
     });
+  })
+);
+
+/**
+ * GET /api/admin/moderation — the flagged queue.
+ *
+ * Flagging already existed but nothing listed the results, so a flagged
+ * ticket was only findable by whoever happened to flag it. Anonymous
+ * authors stay anonymous here: the queue is for triage, and identity is
+ * a separate, audited step below.
+ */
+router.get(
+  '/moderation',
+  requireAuth,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const tickets = await prisma.ticket.findMany({
+      where: { isFlagged: true },
+      orderBy: { updatedAt: 'desc' },
+      take: 100,
+      select: {
+        id: true,
+        ticketNumber: true,
+        description: true,
+        category: true,
+        status: true,
+        isAnonymous: true,
+        flagReason: true,
+        createdAt: true,
+        updatedAt: true,
+        author: { select: { id: true, fullName: true } },
+      },
+    });
+
+    res.json({
+      tickets: tickets.map(({ author, isAnonymous, ...t }) => ({
+        ...t,
+        isAnonymous,
+        // Same rule as the public board. An admin who needs the name
+        // asks for it explicitly and leaves a record by doing so.
+        author: isAnonymous ? null : author,
+      })),
+    });
+  })
+);
+
+const revealSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(10, 'Record why this reveal is justified — at least 10 characters.')
+    .max(500),
+});
+
+/**
+ * POST /api/admin/tickets/:id/reveal
+ *
+ * Anonymity is promised to students, so breaking it cannot be a silent
+ * side effect of opening a page. It requires an explicit request, a
+ * written reason, and it writes an audit row naming the admin — which is
+ * what makes the promise on the submission form ("administrators can
+ * still trace serious abuse") both true and accountable.
+ */
+router.post(
+  '/tickets/:id/reveal',
+  requireAuth,
+  requireAdmin,
+  validateBody(revealSchema),
+  asyncHandler(async (req, res) => {
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        ticketNumber: true,
+        isAnonymous: true,
+        author: {
+          select: { id: true, fullName: true, email: true, matricNumber: true },
+        },
+      },
+    });
+
+    if (!ticket) throw new ApiError(404, 'Ticket not found.');
+    if (!ticket.isAnonymous) {
+      throw new ApiError(400, 'This ticket is not anonymous — the author is already shown.');
+    }
+
+    // Awaited, unlike the fire-and-forget audits elsewhere. If we cannot
+    // record the reveal we must not perform it, or the log stops being
+    // evidence of anything.
+    await prisma.auditLog.create({
+      data: {
+        actorId: req.user.id,
+        action: 'ANONYMOUS_AUTHOR_REVEALED',
+        entityType: 'ticket',
+        entityId: ticket.id,
+        metadata: {
+          ticketNumber: ticket.ticketNumber,
+          reason: req.body.reason,
+          revealedUserId: ticket.author?.id ?? null,
+        },
+        ipAddress: req.ip,
+      },
+    });
+
+    res.json({ author: ticket.author });
   })
 );
 

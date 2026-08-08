@@ -14,8 +14,57 @@ import { ApiError } from '../utils/ApiError.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAuth, requireStaff, optionalAuth } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
+import { notifyMany } from '../services/pushService.js';
 
 const router = express.Router();
+
+/**
+ * How long after publishing an announcement can still be edited.
+ *
+ * Students are notified the moment something is published, so the text
+ * they were pushed and the text on the page must not drift. A short
+ * window covers the typo you spot immediately; anything later should be
+ * a new announcement rather than a silent rewrite of a notice people
+ * have already read.
+ */
+const EDIT_WINDOW_MS = 10 * 60 * 1000;
+
+/** Milliseconds left in the edit window, 0 once it has closed. */
+const editWindowRemaining = (announcement) => {
+  if (!announcement.publishedAt) return EDIT_WINDOW_MS; // drafts stay editable
+  const elapsed = Date.now() - new Date(announcement.publishedAt).getTime();
+  return Math.max(0, EDIT_WINDOW_MS - elapsed);
+};
+
+/**
+ * Announces to every active student.
+ *
+ * Staff are skipped: they either wrote the notice or already saw it in
+ * the drafts list, and reps get enough ticket traffic without also being
+ * pinged by their own colleagues' announcements.
+ */
+async function broadcastAnnouncement(announcement) {
+  const recipients = await prisma.profile.findMany({
+    where: { isActive: true, role: 'STUDENT' },
+    select: { id: true },
+  });
+
+  // Trimmed: the push payload shows on a lock screen, where a 5,000
+  // character body would be truncated anyway.
+  const preview =
+    announcement.body.length > 140 ? `${announcement.body.slice(0, 137)}…` : announcement.body;
+
+  await notifyMany(
+    recipients.map((r) => r.id),
+    {
+      type: 'ANNOUNCEMENT',
+      title: announcement.title,
+      body: preview,
+      link: '/announcements',
+      tag: `announcement-${announcement.id}`,
+    }
+  );
+}
 
 const announcementSchema = z.object({
   title: z.string().trim().min(3).max(150),
@@ -90,6 +139,10 @@ router.get(
         publishedAt: a.publishedAt,
         createdAt: a.createdAt,
         author: a.author,
+        // The window is the server's rule, so the server reports what's
+        // left of it. A client counting from `publishedAt` itself would
+        // drift with clock skew and offer an edit the API then rejects.
+        editWindowMs: isStaff ? editWindowRemaining(a) : 0,
         polls: a.polls.map((p) => serialisePoll(p, voteByPoll.get(p.id))),
       })),
     });
@@ -113,7 +166,18 @@ router.post(
       include: { author: { select: { id: true, fullName: true, role: true } } },
     });
 
-    res.status(201).json({ announcement });
+    // Drafts stay silent — that's the entire point of a draft.
+    if (announcement.publishedAt) {
+      // A failed fan-out must not turn a saved announcement into a 500;
+      // the notice exists either way and can be re-broadcast.
+      await broadcastAnnouncement(announcement).catch((error) => {
+        console.warn('[announcements] broadcast failed:', error.message);
+      });
+    }
+
+    res.status(201).json({
+      announcement: { ...announcement, editWindowMs: editWindowRemaining(announcement) },
+    });
   })
 );
 
@@ -128,9 +192,20 @@ router.patch(
 
     const { publish, ...data } = req.body;
 
+    // Enforced here rather than in the UI: hiding the button stops the
+    // honest mistake, but only a server-side check actually holds.
+    const isEditingContent = data.title !== undefined || data.body !== undefined;
+    if (isEditingContent && existing.publishedAt && editWindowRemaining(existing) === 0) {
+      throw new ApiError(
+        403,
+        'The 10-minute edit window has closed. Post a new announcement instead — students have already been notified about this one.'
+      );
+    }
+
     // Publishing is one-way here: unpublishing something students have
     // already been notified about causes more confusion than it solves.
-    if (publish === true && !existing.publishedAt) data.publishedAt = new Date();
+    const isPublishingNow = publish === true && !existing.publishedAt;
+    if (isPublishingNow) data.publishedAt = new Date();
 
     const announcement = await prisma.announcement.update({
       where: { id: req.params.id },
@@ -138,7 +213,17 @@ router.patch(
       include: { author: { select: { id: true, fullName: true, role: true } } },
     });
 
-    res.json({ announcement });
+    // Only on the draft -> published transition. Editing an already-live
+    // announcement must not notify everyone a second time.
+    if (isPublishingNow) {
+      await broadcastAnnouncement(announcement).catch((error) => {
+        console.warn('[announcements] broadcast failed:', error.message);
+      });
+    }
+
+    res.json({
+      announcement: { ...announcement, editWindowMs: editWindowRemaining(announcement) },
+    });
   })
 );
 

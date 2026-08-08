@@ -78,10 +78,10 @@ export default function Home() {
           ].map(([label, value]) => (
             <div
               key={label}
-              className="rounded-xl border border-slate-200 bg-white p-5 text-center"
+              className="rounded-xl border border-slate-200 bg-white p-5 text-center dark:border-slate-800 dark:bg-slate-900"
             >
               <dd className="text-2xl font-bold text-[#006633]">{value ?? 0}</dd>
-              <dt className="mt-1 text-xs text-slate-500">{label}</dt>
+              <dt className="mt-1 text-xs text-slate-500 dark:text-slate-400">{label}</dt>
             </div>
           ))}
         </dl>
@@ -89,10 +89,10 @@ export default function Home() {
 
       <section className="mt-10 grid gap-5 sm:grid-cols-3">
         {POINTS.map(({ icon: Icon, title, body }) => (
-          <div key={title} className="rounded-xl border border-slate-200 bg-white p-6">
+          <div key={title} className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
             <Icon size={24} className="mb-3 text-[#006633]" aria-hidden="true" />
-            <h2 className="mb-1 font-semibold text-slate-900">{title}</h2>
-            <p className="text-sm text-slate-600">{body}</p>
+            <h2 className="mb-1 font-semibold text-slate-900 dark:text-white">{title}</h2>
+            <p className="text-sm text-slate-600 dark:text-slate-400">{body}</p>
           </div>
         ))}
       </section>

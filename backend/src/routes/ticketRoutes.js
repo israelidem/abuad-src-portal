@@ -169,7 +169,19 @@ router.post(
     if (data.departmentId) {
       const dept = await prisma.department.findUnique({ where: { id: data.departmentId } });
       if (!dept || !dept.isActive) throw new ApiError(400, 'That department is not available.');
+
+      // The form now asks only "which department?", so the category is
+      // derived from that choice. An explicit category still wins, which
+      // keeps older clients working and lets staff override the mapping
+      // when one department handles more than one kind of issue.
+      data.category ??= dept.category;
     }
+
+    // Belt and braces. The validator already requires one of the two, but
+    // a department row predating the category column would leave us
+    // inserting null into a NOT NULL column — a 500 where a sensible
+    // default costs nothing.
+    data.category ??= 'OTHER';
 
     const ticket = await prisma.$transaction(async (tx) => {
       const created = await tx.ticket.create({
