@@ -288,13 +288,35 @@ export const buildOrderBy = (sort) => {
  * parameters: anonymous callers only ever see public, unflagged tickets.
  */
 export const buildWhere = (query, viewer) => {
-  const { status, category, urgency, departmentId, assignedToId, faculty, q, scope, includePrivate } =
-    query;
+  const {
+    status,
+    category,
+    urgency,
+    departmentId,
+    assignedToId,
+    faculty,
+    q,
+    scope,
+    includePrivate,
+    mine,
+    overdue,
+  } = query;
+
+  // `?mine=true` is the alias the dashboard has always sent. Treated as
+  // scope=mine so both spellings resolve to the same filter.
+  const effectiveScope = scope === 'all' && mine ? 'mine' : scope;
 
   const where = { AND: [] };
 
   if (isStaff(viewer)) {
-    if (!includePrivate) where.AND.push({ isPublic: true });
+    // Staff see private and anonymous submissions by default — they are
+    // the people meant to action them. Only an explicit
+    // `includePrivate=false` narrows the view to the public board.
+    //
+    // This was the anonymous-feedback bug: `includePrivate` defaulted to
+    // false, so `isPublic: true` was appended to *every* staff query and
+    // private reports never reached an admin screen.
+    if (includePrivate === false) where.AND.push({ isPublic: true });
   } else if (viewer) {
     where.AND.push({
       OR: [
@@ -307,10 +329,13 @@ export const buildWhere = (query, viewer) => {
     where.AND.push({ isPublic: true, isFlagged: false });
   }
 
-  if (scope === 'mine') {
+  if (effectiveScope === 'mine') {
     if (!viewer) throw new ApiError(401, 'Sign in to view your tickets.');
+    // Anonymous tickets still match here: authorId is retained on the row
+    // precisely so a student keeps access to what they filed. Anonymity is
+    // applied on the way out by serialiseTicket, not by dropping the link.
     where.AND.push({ authorId: viewer.id });
-  } else if (scope === 'assigned') {
+  } else if (effectiveScope === 'assigned') {
     if (!isStaff(viewer)) throw new ApiError(403, 'Only SRC staff have an assigned queue.');
     where.AND.push({ assignedToId: viewer.id });
   }
@@ -321,6 +346,17 @@ export const buildWhere = (query, viewer) => {
   if (departmentId) where.AND.push({ departmentId });
   if (assignedToId) where.AND.push({ assignedToId });
   if (faculty) where.AND.push({ faculty: { contains: faculty, mode: 'insensitive' } });
+
+  // Past the SLA deadline and not yet closed out. RESOLVED/CLOSED are
+  // excluded because a ticket that was answered late is no longer an
+  // action item — leaving them in made the "needs attention" queue mostly
+  // historical noise.
+  if (overdue) {
+    where.AND.push({
+      dueAt: { not: null, lt: new Date() },
+      status: { notIn: ['RESOLVED', 'CLOSED'] },
+    });
+  }
 
   if (q) {
     where.AND.push({

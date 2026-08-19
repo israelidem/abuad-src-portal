@@ -15,6 +15,7 @@ import { requireAuth, optionalAuth, requireStaff, requireAdmin } from '../middle
 import { createTicketLimiter, interactionLimiter } from '../middleware/rateLimiter.js';
 import { validateBody, validateQuery, validateParams } from '../middleware/validate.js';
 import { notify } from '../services/pushService.js';
+import { getSettings } from '../services/settingsService.js';
 import {
   createTicketSchema,
   updateTicketSchema,
@@ -122,7 +123,26 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const viewer = req.user ?? null;
-    const where = buildWhere({ scope: 'all', includePrivate: false }, viewer);
+    // Mirrors the list endpoint's filters so the counts describe the list
+    // the user is actually looking at.
+    //
+    // Previously hardcoded to `{ scope: 'all', includePrivate: false }`,
+    // which caused two visible defects:
+    //
+    //   * The student dashboard sends `?mine=true`. Forcing scope 'all'
+    //     meant "My reports" summarised the entire public board, so the
+    //     tiles never matched the list beneath them.
+    //   * `includePrivate: false` appended `isPublic: true` for staff too,
+    //     so private and anonymous submissions were missing from every
+    //     admin total — the same root cause as the anonymous-ticket bug.
+    const where = buildWhere(
+      {
+        scope: 'all',
+        mine: req.query.mine === 'true' || req.query.mine === true,
+        includePrivate: req.query.includePrivate === 'false' ? false : undefined,
+      },
+      viewer
+    );
 
     const [byStatus, byCategory, byUrgency, total, overdue] = await Promise.all([
       prisma.ticket.groupBy({ by: ['status'], where, _count: true }),
@@ -165,6 +185,31 @@ router.post(
   validateBody(createTicketSchema),
   asyncHandler(async (req, res) => {
     const { attachments, ...data } = req.body;
+
+    /**
+     * Portal policy, enforced server-side.
+     *
+     * The submission form also hides the anonymity checkbox and caps the
+     * picker, but the form is not the boundary — these checks are what
+     * actually hold when someone posts straight to the API.
+     *
+     * Read fresh: an admin turning anonymity off wants it off now, not up
+     * to CACHE_TTL_MS later. Ticket creation is rate-limited and far less
+     * frequent than the maintenance check the cache exists for, so the
+     * extra round-trip is affordable here.
+     */
+    const { allowAnonymousTickets, maxAttachmentsPerTicket } = await getSettings({ fresh: true });
+
+    if (data.isAnonymous && !allowAnonymousTickets) {
+      throw new ApiError(403, 'Anonymous submissions are currently disabled.');
+    }
+
+    if (attachments && attachments.length > maxAttachmentsPerTicket) {
+      throw new ApiError(
+        400,
+        `You can attach at most ${maxAttachmentsPerTicket} file${maxAttachmentsPerTicket === 1 ? '' : 's'}.`
+      );
+    }
 
     if (data.departmentId) {
       const dept = await prisma.department.findUnique({ where: { id: data.departmentId } });

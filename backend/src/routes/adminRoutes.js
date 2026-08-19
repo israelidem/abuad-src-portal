@@ -22,6 +22,8 @@ import {
 } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import { getSettings, updateSettings } from '../services/settingsService.js';
+import { settingsSchema } from '../validators/settingsSchemas.js';
+import { settingsManifest, toPublicSettings } from '../config/settingsRegistry.js';
 
 const router = express.Router();
 
@@ -48,23 +50,27 @@ const audit = async (req, action, entityType, entityId, metadata) => {
 // Settings & maintenance mode — SUPER_ADMIN only
 // ------------------------------------------------------------
 
-const settingsSchema = z
-  .object({
-    restrictSignupDomains: z.boolean().optional(),
-    allowedDomains: z.array(z.string().trim().toLowerCase()).max(20).optional(),
-    allowSubdomains: z.boolean().optional(),
-    blockedDomains: z.array(z.string().trim().toLowerCase()).max(50).optional(),
-    maintenanceMode: z.boolean().optional(),
-    maintenanceMessage: z.string().trim().max(300).nullish(),
-  })
-  .refine((d) => Object.keys(d).length > 0, { message: 'No changes supplied.' });
-
+/**
+ * GET /api/admin/settings
+ *
+ * Returns the values *and* the manifest describing them — groups, labels,
+ * types and help text, straight from the registry. The settings screen
+ * renders from the manifest rather than a hard-coded form, so adding a
+ * setting to the registry surfaces it in the UI without a frontend change.
+ *
+ * That also removes the failure mode where a setting existed in the
+ * database and the validator but had no control on the page, leaving it
+ * editable only by hand-crafted API calls.
+ */
 router.get(
   '/settings',
   requireAuth,
   requireSuperAdmin,
   asyncHandler(async (_req, res) => {
-    res.json({ settings: await getSettings({ fresh: true }) });
+    res.json({
+      settings: await getSettings({ fresh: true }),
+      manifest: settingsManifest(),
+    });
   })
 );
 
@@ -97,15 +103,28 @@ router.patch(
 /**
  * GET /api/admin/maintenance — public.
  *
- * The frontend needs this before sign-in to show the banner, so it's the
- * one settings field readable without a token. Only the flag and message
- * are exposed, never the domain lists.
+ * The frontend needs some settings before sign-in — the maintenance banner,
+ * the portal name, whether to render the registration form — so the subset
+ * marked `public` in the registry is readable without a token. The domain
+ * lists are deliberately not in that subset: publishing them would hand out
+ * a map of which email suffixes are accepted.
+ *
+ * `allowStudentSignups` is safe to expose — it's a UI hint, not the control.
+ * The actual rejection happens in POST /api/auth/signup, so a client that
+ * ignores this response still cannot register.
  */
 router.get(
   '/maintenance',
   asyncHandler(async (_req, res) => {
-    const { maintenanceMode, maintenanceMessage } = await getSettings();
-    res.json({ maintenanceMode, maintenanceMessage });
+    // Narrowed by the registry rather than by a hand-written list. The old
+    // version destructured four fields by name, so every new setting
+    // needed remembering here — and a field added without thinking about
+    // exposure would have been one careless spread away from public.
+    //
+    // toPublicSettings() is an allow-list: a new column stays private
+    // until someone marks it `public` in the registry, so the failure mode
+    // is a missing UI hint rather than a leak.
+    res.json(toPublicSettings(await getSettings()));
   })
 );
 

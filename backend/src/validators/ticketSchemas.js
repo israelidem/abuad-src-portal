@@ -199,15 +199,53 @@ export const listTicketsQuerySchema = z.object({
   /// "mine" — only the caller's tickets; "assigned" — staff's queue
   scope: z.enum(['all', 'mine', 'assigned']).default('all'),
 
+  /**
+   * Accepted as an alias for `scope=mine`.
+   *
+   * The dashboard has always sent `?mine=true`. Zod strips unknown keys,
+   * so that param was silently discarded and `scope` fell back to 'all' —
+   * meaning "My reports" actually listed the whole public board. Honouring
+   * the alias fixes existing callers without needing a coordinated deploy.
+   */
+  mine: z
+    .union([z.boolean(), z.string()])
+    .transform((v) => v === true || v === 'true')
+    .optional(),
+
+  /**
+   * Past the SLA due date and still unresolved.
+   *
+   * Same story as `mine`: the admin dashboard sends `?overdue=true` to
+   * build its "needs attention" queue, the param was dropped, and the
+   * queue was really just "oldest tickets, resolved ones included".
+   */
+  overdue: z
+    .union([z.boolean(), z.string()])
+    .transform((v) => v === true || v === 'true')
+    .optional(),
+
   sort: z
     .enum(['newest', 'oldest', 'most_voted', 'most_discussed', 'due_soon', 'urgency'])
     .default('newest'),
 
-  /// Staff-only: include tickets hidden from the public board
+  /**
+   * Staff-only: whether tickets hidden from the public board are included.
+   *
+   * Defaults to *undefined*, not false. This used to default to false,
+   * which meant every staff query silently appended `isPublic: true` —
+   * so private submissions were invisible on the admin dashboard, in
+   * department queues and in search. An admin who was never told the
+   * report existed cannot action it, which defeated the feature.
+   *
+   * Now: staff see everything unless they explicitly pass
+   * `includePrivate=false` to narrow the view to the public board.
+   * Students are unaffected — their visibility is decided by ownership
+   * in buildWhere and never by this flag.
+   */
   includePrivate: z
     .union([z.boolean(), z.string()])
     .transform((v) => v === true || v === 'true')
-    .default(false),
+    .optional(),
 });
 
 /**

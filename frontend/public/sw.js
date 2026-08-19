@@ -136,7 +136,26 @@ self.addEventListener('push', (event) => {
     data: { link: payload.link ?? '/dashboard' },
   };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(
+    (async () => {
+      await self.registration.showNotification(title, options);
+
+      // Tell any open tab to refresh its bell.
+      //
+      // Without this the in-app list and the unread badge stay stale until
+      // the next 60s poll, so a student could be looking at the portal,
+      // receive a system notification, and see nothing change on the page
+      // they are actually reading. The tab decides what to do with this —
+      // the worker deliberately doesn't know about the API or the token.
+      const clientList = await self.clients.matchAll({
+        type: 'window',
+        includeUncontrolled: true,
+      });
+      for (const client of clientList) {
+        client.postMessage({ type: 'notification', link: options.data.link });
+      }
+    })()
+  );
 });
 
 self.addEventListener('notificationclick', (event) => {

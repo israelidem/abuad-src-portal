@@ -8,11 +8,11 @@
  * using a personal address finds out before filling in the whole form.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, AlertCircle, CheckCircle, Info } from 'lucide-react';
+import { Eye, EyeOff, AlertCircle, CheckCircle, Info, Lock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
-import { authApi } from '../lib/api.js';
+import { authApi, adminApi } from '../lib/api.js';
 import { Spinner } from '../components/Spinner.jsx';
 import Logo from '../components/Logo.jsx';
 
@@ -41,6 +41,32 @@ export default function Signup() {
   const [emailHint, setEmailHint] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(null);
+
+  /**
+   * Whether registration is open.
+   *
+   * `null` = not yet known, so the form isn't flashed before we find out.
+   * This is presentation only — the real gate is in POST /api/auth/signup,
+   * which rejects a closed signup regardless of what this says. If the
+   * check fails we assume open and let the API deliver the bad news,
+   * rather than blocking a legitimate student over a failed request.
+   */
+  const [signupOpen, setSignupOpen] = useState(null);
+  const [closedMessage, setClosedMessage] = useState('');
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    adminApi
+      .maintenance({ signal: controller.signal })
+      .then(({ allowStudentSignups, signupClosedMessage }) => {
+        setSignupOpen(allowStudentSignups ?? true);
+        setClosedMessage(signupClosedMessage ?? '');
+      })
+      .catch(() => setSignupOpen(true));
+
+    return () => controller.abort();
+  }, []);
 
   const update = (field) => (event) => {
     setForm((prev) => ({ ...prev, [field]: event.target.value }));
@@ -81,6 +107,41 @@ export default function Signup() {
       setSubmitting(false);
     }
   };
+
+  if (signupOpen === null) {
+    return (
+      <div className="flex justify-center py-16">
+        <Spinner size="lg" />
+      </div>
+    );
+  }
+
+  if (!signupOpen) {
+    return (
+      <div className="mx-auto max-w-md py-8">
+        <div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <Logo size="lg" onLight className="mx-auto mb-4" />
+          <Lock size={32} className="mx-auto mb-4 text-amber-600 dark:text-amber-400" />
+          <h1 className="mb-2 text-xl font-semibold text-slate-900 dark:text-white">
+            Registration currently closed
+          </h1>
+          <p className="mb-6 text-sm text-slate-600 dark:text-slate-400">
+            {closedMessage ||
+              'New student registrations are temporarily unavailable. Please check back later or contact the SRC.'}
+          </p>
+          <p className="mb-6 text-sm text-slate-600 dark:text-slate-400">
+            Already have an account? You can still sign in.
+          </p>
+          <Link
+            to="/login"
+            className="inline-block rounded-lg bg-[#006633] px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
+          >
+            Go to sign in
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   if (done) {
     return (

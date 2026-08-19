@@ -11,21 +11,60 @@
  */
 
 import { prisma } from '../lib/prisma.js';
+import { SETTING_DEFAULTS } from '../config/settingsRegistry.js';
 
 const CACHE_TTL_MS = 10_000;
 
-const DEFAULTS = {
-  id: 1,
-  restrictSignupDomains: false,
-  allowedDomains: [],
-  allowSubdomains: true,
-  blockedDomains: [],
-  maintenanceMode: false,
-  maintenanceMessage: null,
-};
+/**
+ * Fallback values, derived from the registry rather than repeated here.
+ *
+ * This was a hand-written object, and it drifted from the database during
+ * Phase 5 — the portal served stale defaults (registration open, domain
+ * allow-list ignored) with nothing in the logs. Deriving it means the
+ * fallback cannot silently disagree with the registry again.
+ *
+ * The registry requires every default to fail open, so a settings read
+ * failure leaves the portal usable rather than looking like an outage.
+ */
+const DEFAULTS = SETTING_DEFAULTS;
 
 let cache = null;
 let cachedAt = 0;
+
+/**
+ * Throttle for the fallback warning.
+ *
+ * getSettings() runs on nearly every mutating request, so an unthrottled
+ * log line would emit thousands of identical entries a minute and bury the
+ * thing it is trying to report.
+ */
+let lastWarnedAt = 0;
+const WARN_INTERVAL_MS = 60_000;
+
+/**
+ * Reports that we are serving DEFAULTS instead of real settings.
+ *
+ * This used to be a bare `catch {}`. The failure mode that justifies the
+ * noise: if a migration adds a column to the Prisma schema but the SQL
+ * hasn't been applied, Prisma selects a column that doesn't exist, every
+ * read throws 42703, and the portal quietly runs on defaults — signups
+ * open and the domain allow-list ignored — with nothing in the logs.
+ */
+const warnFallback = (error) => {
+  if (Date.now() - lastWarnedAt < WARN_INTERVAL_MS) return;
+  lastWarnedAt = Date.now();
+
+  const drift = error?.meta?.code === '42703' || /does not exist/i.test(error?.message ?? '');
+
+  console.error(
+    `[settings] read failed — serving ${cache ? 'stale cache' : 'DEFAULTS'}: ${error?.message?.split('\n')[0]}` +
+      (drift
+        ? '\n[settings] a column is missing: the Prisma schema is ahead of the database.' +
+          '\n[settings] domain policy and maintenance mode are NOT being applied.' +
+          '\n[settings] run the pending migration in backend/prisma/sql, then restart.'
+        : '')
+  );
+};
 
 /** Drops the cache so the next read hits the database. */
 export const invalidateSettingsCache = () => {
@@ -53,7 +92,10 @@ export const getSettings = async ({ fresh = false } = {}) => {
     cache = settings;
     cachedAt = Date.now();
     return settings;
-  } catch {
+  } catch (error) {
+    // Still fails open — a settings blip must not take the API down — but
+    // no longer silently.
+    warnFallback(error);
     return cache ?? DEFAULTS;
   }
 };

@@ -414,9 +414,23 @@ model SavedView {
 }
 
 /// Single-row table (id is pinned to 1 by a CHECK constraint).
-/// Controls the signup email-domain policy, editable from the admin UI.
+/// Portal settings, editable from the admin UI.
+///
+/// Every field here is described once in
+/// backend/src/config/settingsRegistry.js, which derives the validator, the
+/// fallback defaults, the publicly-readable subset and the admin form. Add
+/// a column here AND an entry there, or the setting will not be editable.
+///
+/// The registry also records which file enforces each setting: a setting
+/// nothing reads is worse than no setting, because it tells an
+/// administrator they have changed something when they have not.
 model AppSettings {
   id                    Int      @id @default(1)
+
+  /// Identity. Shown pre-sign-in, so both are publicly readable.
+  portalName            String   @default("ABUAD SRC Portal") @map("portal_name")
+  supportEmail          String?  @map("support_email")
+
   restrictSignupDomains Boolean  @default(false) @map("restrict_signup_domains")
   allowedDomains        String[] @default([]) @map("allowed_domains")
   allowSubdomains       Boolean  @default(true) @map("allow_subdomains")
@@ -428,6 +442,27 @@ model AppSettings {
   /// is far more useful during a migration than a wall.
   maintenanceMode       Boolean  @default(false) @map("maintenance_mode")
   maintenanceMessage    String?  @map("maintenance_message")
+
+  /// Registration control. When off, POST /api/auth/signup returns 403 and
+  /// the registration page says so. Login and existing accounts are
+  /// untouched — this gates account *creation* only, so turning it off
+  /// can never lock out staff or current students.
+  allowStudentSignups   Boolean  @default(true) @map("allow_student_signups")
+  signupClosedMessage   String?  @map("signup_closed_message")
+
+  /// When on, a matric number is mandatory at signup. Defaults off so a
+  /// settings read failure cannot start rejecting registrations.
+  requireMatricNumber   Boolean  @default(false) @map("require_matric_number")
+
+  /// Anonymous feedback. Turning this off applies to NEW tickets only —
+  /// tickets already filed anonymously stay anonymous, because revealing
+  /// an author retroactively would break the promise they filed under.
+  allowAnonymousTickets Boolean  @default(true) @map("allow_anonymous_tickets")
+
+  /// Attachment ceiling per ticket. A CHECK constraint keeps this in 1..10
+  /// at the database level, so a direct connection cannot set 0 (silently
+  /// disabling uploads) or something absurd.
+  maxAttachmentsPerTicket Int    @default(5) @map("max_attachments_per_ticket")
 
   updatedById           String?  @map("updated_by_id") @db.Uuid
   updatedBy             Profile? @relation(fields: [updatedById], references: [id], onDelete: SetNull)

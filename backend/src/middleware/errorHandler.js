@@ -19,10 +19,26 @@ export const errorHandler = (err, req, res, _next) => {
   let details = err.details;
 
   // --- Prisma: unique constraint violation ---
+  //
+  // This is the backstop for a genuine race: signup checks the matric
+  // number before inserting, but two simultaneous requests can both pass
+  // that check and only one can win the UNIQUE index. The loser lands here,
+  // so the copy has to be presentable rather than a leaked column name —
+  // it previously read "That matric_number is already in use."
   if (err.code === 'P2002') {
     statusCode = 409;
-    const field = err.meta?.target?.[0] ?? 'value';
-    message = `That ${field} is already in use.`;
+    const target = err.meta?.target;
+    const field = Array.isArray(target) ? target[0] : target ?? 'value';
+
+    // Deliberately worded not to confirm *whose* account it is, which
+    // would turn this endpoint into an account-enumeration oracle.
+    const FRIENDLY = {
+      email: 'An account with this email already exists.',
+      matric_number: 'This matriculation number is already registered.',
+      matricNumber: 'This matriculation number is already registered.',
+    };
+
+    message = FRIENDLY[field] ?? `That ${String(field).replace(/_/g, ' ')} is already in use.`;
   }
 
   // --- Prisma: record not found ---

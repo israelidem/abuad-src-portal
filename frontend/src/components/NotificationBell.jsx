@@ -55,10 +55,42 @@ export default function NotificationBell() {
       await load(controller.signal);
     })();
 
-    const id = setInterval(() => load(controller.signal), POLL_MS);
+    // Background tabs are throttled hard by every modern browser —
+    // setInterval can be held to once a minute or stopped altogether, and
+    // a phone with the PWA backgrounded may not run it for far longer.
+    // Polling alone therefore meant returning to the tab and seeing a
+    // stale bell for up to a minute, which is what "notifications don't
+    // arrive" actually looked like most of the time.
+    //
+    // Refetching whenever the tab becomes visible again closes that gap:
+    // the moment a student looks at the page, what they see is current.
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') load(controller.signal);
+    }, POLL_MS);
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') load(controller.signal);
+    };
+
+    document.addEventListener('visibilitychange', onVisible);
+    // Covers alt-tab back to an already-visible tab, where
+    // visibilitychange does not fire.
+    window.addEventListener('focus', onVisible);
+
+    // A push arriving is the strongest possible signal that the bell is
+    // out of date. The service worker forwards a message on every push,
+    // so an open tab updates immediately instead of waiting for the poll.
+    const onSwMessage = (event) => {
+      if (event.data?.type === 'notification') load(controller.signal);
+    };
+    navigator.serviceWorker?.addEventListener('message', onSwMessage);
+
     return () => {
       controller.abort();
       clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+      navigator.serviceWorker?.removeEventListener('message', onSwMessage);
     };
   }, [load]);
 

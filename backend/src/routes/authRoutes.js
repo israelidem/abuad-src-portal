@@ -18,6 +18,8 @@ import { requireAuth } from '../middleware/auth.js';
 import { authLimiter } from '../middleware/rateLimiter.js';
 import { validateBody } from '../middleware/validate.js';
 import { checkEmailDomain, isApprovedDomain } from '../services/domainPolicy.js';
+import { getSettings } from '../services/settingsService.js';
+import { checkSignupAllowed } from '../services/registrationPolicy.js';
 import {
   signupSchema,
   updateProfileSchema,
@@ -53,8 +55,45 @@ router.post(
   asyncHandler(async (req, res) => {
     const { email, password, fullName, matricNumber, faculty, department } = req.body;
 
+    // Registration switch. Checked here, before any Supabase work, because
+    // this route holds the service-role key and is therefore the only path
+    // that can mint an account — the browser cannot create one directly
+    // (anon has no INSERT on profiles, see 06_security_hardening.sql).
+    //
+    // Read fresh: a stale cache entry could keep registration open for up
+    // to the cache TTL after an admin closes it, and "closed" is exactly
+    // the kind of decision that should take effect immediately.
+    //
+    // Note this gates account *creation* only. Login, password reset and
+    // every existing account are untouched, so closing signups can never
+    // lock out current students or staff.
+    //
+    // Read once and reused for the matric-number rule below: two separate
+    // fresh reads could disagree if an admin saved between them, and would
+    // double the settings latency on every signup for no benefit.
+    const settings = await getSettings({ fresh: true });
+
+    const signup = checkSignupAllowed(settings);
+    if (!signup.allowed) throw new ApiError(403, signup.reason);
+
     const { allowed, reason } = await checkEmailDomain(email);
     if (!allowed) throw new ApiError(403, reason);
+
+    /**
+     * Matric number, required only if the admin says so.
+     *
+     * Checked here rather than in the Zod schema because the requirement
+     * is a runtime setting, not a property of the request shape — a schema
+     * built at import time cannot know what the admin chose this morning.
+     *
+     * Ordered before the Supabase Auth call for the same reason as the
+     * duplicate check below: rejecting afterwards would leave an orphaned
+     * auth user, and the student's corrected second attempt would then be
+     * refused with "email already registered".
+     */
+    if (settings.requireMatricNumber && !matricNumber) {
+      throw new ApiError(400, 'A matriculation number is required to register.');
+    }
 
     // Check matric number before creating the auth user, so a duplicate
     // doesn't leave an orphaned account behind.
