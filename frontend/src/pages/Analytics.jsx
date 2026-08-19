@@ -25,6 +25,7 @@ import {
 
 import { adminApi } from '../lib/api.js';
 import { useToast } from '../context/ToastContext.jsx';
+import { useTheme } from '../context/ThemeContext.jsx';
 import { STATUSES, CATEGORIES } from '../lib/constants.js';
 import { Spinner } from '../components/Spinner.jsx';
 
@@ -36,6 +37,37 @@ const SLICE_COLOURS = ['#006633', '#0ea5e9', '#f59e0b', '#8b5cf6', '#ef4444', '#
 // good week, which is the one row that should never be hard to find.
 const URGENCY_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
 const URGENCY_COLOURS = ['#ef4444', '#f59e0b', '#0ea5e9', '#64748b'];
+
+/**
+ * Chart colours per theme.
+ *
+ * Recharts renders SVG with inline attributes and builds its tooltip as a
+ * plain div with an inline style object. Neither can be reached by a
+ * Tailwind `dark:` class, which is why the charts stayed light while the
+ * rest of the admin dashboard went dark — the tooltip in particular was
+ * white-on-white text, unreadable rather than merely mismatched.
+ *
+ * The series colours (SLICE_COLOURS, URGENCY_COLOURS, the green and blue
+ * lines) are deliberately unchanged: they carry meaning, they're the same
+ * palette the status badges use, and they hold up on both backgrounds.
+ * Only the chrome — axes, grid, tooltip surface — is themed.
+ */
+const CHART_THEME = {
+  light: {
+    axis: '#64748b', // slate-500
+    grid: '#cbd5e1', // slate-300
+    tooltipBg: '#ffffff',
+    tooltipBorder: '#e2e8f0',
+    tooltipText: '#0f172a',
+  },
+  dark: {
+    axis: '#94a3b8', // slate-400 — lighter, for contrast against slate-900
+    grid: '#334155', // slate-700
+    tooltipBg: '#0f172a', // slate-900
+    tooltipBorder: '#1e293b', // slate-800
+    tooltipText: '#f1f5f9', // slate-100
+  },
+};
 
 function Stat({ label, value, hint }) {
   return (
@@ -51,6 +83,34 @@ function Stat({ label, value, hint }) {
 
 export default function Analytics() {
   const toast = useToast();
+  // `resolved` is the concrete light/dark in effect, already accounting
+  // for "system". Charts need an actual colour, not a preference.
+  const { resolved } = useTheme();
+  const chart = CHART_THEME[resolved] ?? CHART_THEME.light;
+
+  // Recharts' tooltip takes style objects, so the theme has to be passed
+  // as props on every instance. Built once here to keep the three call
+  // sites from drifting apart.
+  const tooltipStyles = {
+    contentStyle: {
+      backgroundColor: chart.tooltipBg,
+      border: `1px solid ${chart.tooltipBorder}`,
+      borderRadius: '0.5rem',
+      color: chart.tooltipText,
+      fontSize: '0.75rem',
+    },
+    // itemStyle and labelStyle are separate: without them Recharts keeps
+    // its own near-black defaults for the value rows, which disappear
+    // against the dark surface above.
+    itemStyle: { color: chart.tooltipText },
+    labelStyle: { color: chart.tooltipText },
+  };
+
+  const axisProps = {
+    tick: { fontSize: 11, fill: chart.axis },
+    stroke: chart.axis,
+  };
+
   const [days, setDays] = useState(30);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -183,11 +243,16 @@ export default function Analytics() {
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={trendData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.3} />
-                <XAxis dataKey="label" tick={{ fontSize: 11 }} minTickGap={24} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                <Tooltip cursor={{ opacity: 0.1 }} />
-                <Legend />
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  vertical={false}
+                  stroke={chart.grid}
+                  opacity={0.3}
+                />
+                <XAxis dataKey="label" {...axisProps} minTickGap={24} />
+                <YAxis allowDecimals={false} {...axisProps} />
+                <Tooltip cursor={{ opacity: 0.1 }} {...tooltipStyles} />
+                <Legend wrapperStyle={{ fontSize: '0.75rem', color: chart.axis }} />
                 <Line
                   type="monotone"
                   dataKey="created"
@@ -230,7 +295,7 @@ export default function Analytics() {
                     <Cell key={entry.name} fill={SLICE_COLOURS[i % SLICE_COLOURS.length]} />
                   ))}
                 </Pie>
-                <Tooltip />
+                <Tooltip {...tooltipStyles} />
               </PieChart>
             </ResponsiveContainer>
           </div>
@@ -256,10 +321,15 @@ export default function Analytics() {
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={categoryData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.3} />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-15} dy={8} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                <Tooltip cursor={{ opacity: 0.1 }} />
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  vertical={false}
+                  stroke={chart.grid}
+                  opacity={0.3}
+                />
+                <XAxis dataKey="name" {...axisProps} interval={0} angle={-15} dy={8} />
+                <YAxis allowDecimals={false} {...axisProps} />
+                <Tooltip cursor={{ opacity: 0.1 }} {...tooltipStyles} />
                 <Bar dataKey="value" fill="#006633" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>

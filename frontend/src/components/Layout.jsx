@@ -22,6 +22,7 @@ import {
   Settings,
   ShieldAlert,
   ChevronDown,
+  Building2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { adminApi } from '../lib/api.js';
@@ -51,6 +52,7 @@ const ADMIN_NAV = [
   { to: '/admin/analytics', label: 'Analytics', icon: BarChart3, access: 'staff' },
   { to: '/admin/users', label: 'Users', icon: Users, access: 'staff' },
   { to: '/admin/moderation', label: 'Moderation', icon: ShieldAlert, access: 'admin' },
+  { to: '/admin/departments', label: 'Departments', icon: Building2, access: 'admin' },
   { to: '/admin/settings', label: 'Portal settings', icon: Settings, access: 'superadmin' },
 ];
 

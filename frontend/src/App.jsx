@@ -40,6 +40,7 @@ const AdminDashboard = lazy(() => import('./pages/AdminDashboard.jsx'));
 const Analytics = lazy(() => import('./pages/Analytics.jsx'));
 const UserManagement = lazy(() => import('./pages/UserManagement.jsx'));
 const Moderation = lazy(() => import('./pages/Moderation.jsx'));
+const DepartmentManagement = lazy(() => import('./pages/DepartmentManagement.jsx'));
 const PortalSettings = lazy(() => import('./pages/PortalSettings.jsx'));
 const Announcements = lazy(() => import('./pages/Announcements.jsx'));
 const TrackTicket = lazy(() => import('./pages/TrackTicket.jsx'));
@@ -106,6 +107,10 @@ export default function App() {
                       anonymous author, so a REP must not reach it. */}
                   <Route element={<RequireAdmin />}>
                     <Route path="admin/moderation" element={<Moderation />} />
+                    {/* Admin, not staff: creating and retiring departments
+                        reshapes where every future report is routed, which
+                        matches the requireAdmin guard already on the API. */}
+                    <Route path="admin/departments" element={<DepartmentManagement />} />
                   </Route>
 
                   {/* SUPER_ADMIN only — can lock everyone out */}

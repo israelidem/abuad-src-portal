@@ -1,20 +1,34 @@
 /**
- * Image picker with local previews.
+ * Image picker with local previews and client-side compression.
  *
  * Files are held here and uploaded by the parent on submit, so a
  * cancelled form doesn't leave orphans in Storage.
  *
  * Preview URLs are revoked on removal and unmount — object URLs leak
  * memory otherwise.
+ *
+ * Compression happens at selection time rather than at upload time, for
+ * two reasons: the preview then shows what will actually be stored, and
+ * the size limit is checked against the compressed file — so a 7 MB phone
+ * photo that shrinks to 800 KB is accepted rather than rejected for being
+ * over the 5 MB cap. Validating the original would refuse images we are
+ * perfectly capable of storing.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Upload, X, ImageIcon } from 'lucide-react';
+import { Upload, X, ImageIcon, Loader2 } from 'lucide-react';
 import { MAX_FILES, validateFile, formatBytes } from '../lib/uploads.js';
+import { compressImage } from '../lib/imageCompression.js';
 
-export default function AttachmentPicker({ files, onChange, disabled }) {
+export default function AttachmentPicker({ files, onChange, disabled, maxFiles = MAX_FILES }) {
   const inputRef = useRef(null);
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  // What compression achieved, keyed by the resulting File. A WeakMap
+  // would be tidier but React needs a value it can render, and the array
+  // is at most a handful of entries.
+  const [savings, setSavings] = useState([]);
 
   // Derived from `files` rather than mirrored into state — an effect that
   // setStates on every prop change costs an extra render pass for a value
@@ -25,28 +39,66 @@ export default function AttachmentPicker({ files, onChange, disabled }) {
   // previous batch whenever it's replaced and on unmount.
   useEffect(() => () => previews.forEach(URL.revokeObjectURL), [previews]);
 
-  const handleSelect = (event) => {
+  const handleSelect = async (event) => {
     setError('');
     const chosen = Array.from(event.target.files ?? []);
+    // Reset immediately, not after the await: the input must be cleared
+    // even if compression fails, or re-picking the same file silently
+    // does nothing.
+    event.target.value = '';
     if (!chosen.length) return;
 
-    if (files.length + chosen.length > MAX_FILES) {
-      setError(`You can attach up to ${MAX_FILES} images.`);
+    if (files.length + chosen.length > maxFiles) {
+      setError(`You can attach up to ${maxFiles} images.`);
       return;
     }
 
-    const rejected = chosen.map(validateFile).find(Boolean);
-    if (rejected) {
-      setError(rejected);
-      return;
-    }
+    setBusy(true);
+    try {
+      const accepted = [];
+      const stats = [];
 
-    onChange([...files, ...chosen]);
-    // Reset so the same file can be picked again after removal
-    event.target.value = '';
+      for (const original of chosen) {
+        // Type is checked against the original — compression cannot turn
+        // an unsupported format into a supported one, and telling the
+        // student "PDF isn't an image" beats a vague failure later.
+        if (!/^image\//.test(original.type)) {
+          setError(`${original.name} isn’t an image file.`);
+          setBusy(false);
+          return;
+        }
+
+        const result = await compressImage(original);
+
+        // Size is checked against the *compressed* file. This is the
+        // point of doing it here.
+        const rejected = validateFile(result.file);
+        if (rejected) {
+          setError(rejected);
+          setBusy(false);
+          return;
+        }
+
+        accepted.push(result.file);
+        stats.push({
+          name: result.file.name,
+          compressed: result.compressed,
+          originalSize: result.originalSize,
+          finalSize: result.finalSize,
+        });
+      }
+
+      onChange([...files, ...accepted]);
+      setSavings((prev) => [...prev, ...stats]);
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const remove = (index) => onChange(files.filter((_, i) => i !== index));
+  const remove = (index) => {
+    onChange(files.filter((_, i) => i !== index));
+    setSavings((prev) => prev.filter((_, i) => i !== index));
+  };
 
   return (
     <div>
@@ -60,7 +112,7 @@ export default function AttachmentPicker({ files, onChange, disabled }) {
         accept="image/jpeg,image/png,image/webp,image/heic"
         multiple
         onChange={handleSelect}
-        disabled={disabled || files.length >= MAX_FILES}
+        disabled={disabled || busy || files.length >= maxFiles}
         className="sr-only"
         id="attachments"
       />
@@ -68,17 +120,30 @@ export default function AttachmentPicker({ files, onChange, disabled }) {
       <label
         htmlFor="attachments"
         className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed px-4 py-6 text-center transition-colors ${
-          disabled || files.length >= MAX_FILES
-            ? 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400'
-            : 'border-slate-300 text-slate-500 hover:border-[#006633] hover:bg-[#006633]/5'
+          disabled || busy || files.length >= maxFiles
+            ? 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-600'
+            : 'border-slate-300 text-slate-500 hover:border-[#006633] hover:bg-[#006633]/5 dark:border-slate-700 dark:text-slate-400'
         }`}
       >
-        <Upload size={20} className="mb-2" aria-hidden="true" />
+        {busy ? (
+          <Loader2 size={20} className="mb-2 animate-spin" aria-hidden="true" />
+        ) : (
+          <Upload size={20} className="mb-2" aria-hidden="true" />
+        )}
+
         <span className="text-sm font-medium">
-          {files.length >= MAX_FILES ? 'Maximum reached' : 'Tap to add photos'}
+          {busy
+            ? 'Preparing photos…'
+            : files.length >= maxFiles
+              ? 'Maximum reached'
+              : 'Tap to add photos'}
         </span>
+
         <span className="mt-0.5 text-xs">
-          JPEG, PNG or WebP · up to 5 MB each · {files.length}/{MAX_FILES} added
+          {/* Says "resized automatically" rather than quoting the 5 MB cap,
+              because the cap now applies after compression — telling a
+              student their 8 MB photo is too large would be wrong. */}
+          JPEG, PNG or WebP · resized automatically · {files.length}/{maxFiles} added
         </span>
       </label>
 
@@ -114,7 +179,17 @@ export default function AttachmentPicker({ files, onChange, disabled }) {
                 <X size={14} />
               </button>
 
-              <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{formatBytes(file.size)}</p>
+              <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">
+                {formatBytes(file.size)}
+                {/* Shown only when compression actually helped. Reporting
+                    "saved 0 KB" on an already-small file is noise. */}
+                {savings[index]?.compressed && (
+                  <span className="text-emerald-600 dark:text-emerald-400">
+                    {' '}
+                    · from {formatBytes(savings[index].originalSize)}
+                  </span>
+                )}
+              </p>
             </li>
           ))}
         </ul>

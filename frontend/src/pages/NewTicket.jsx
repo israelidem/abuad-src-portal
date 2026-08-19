@@ -115,20 +115,27 @@ export default function NewTicket() {
     setSubmitting(true);
     const uploaded = [];
 
+    // Expand the single privacy choice back into the two flags the API
+    // stores. Derived here, before the uploads, because the upload path
+    // depends on the anonymity flag — deriving it after the loop would
+    // read it before initialisation.
+    const { privacy, ...fields } = form;
+    const preset = PRIVACY_OPTIONS.find((o) => o.value === privacy) ?? PRIVACY_OPTIONS[0];
+
     try {
       if (files.length) {
         setStage(`Uploading ${files.length} photo${files.length > 1 ? 's' : ''}…`);
         for (const file of files) {
-          uploaded.push(await uploadAttachment(file, user.id));
+          // The anonymity flag must follow the file, not just the ticket:
+          // a public bucket plus a userId-prefixed path would publish the
+          // author of an anonymous submission in the image URL.
+          uploaded.push(
+            await uploadAttachment(file, user.id, { anonymous: preset.isAnonymous })
+          );
         }
       }
 
       setStage('Submitting your report…');
-
-      // Expand the single choice back into the two flags the API stores
-      const { privacy, ...fields } = form;
-      const preset =
-        PRIVACY_OPTIONS.find((o) => o.value === privacy) ?? PRIVACY_OPTIONS[0];
 
       const { ticket } = await ticketApi.create({
         ...fields,

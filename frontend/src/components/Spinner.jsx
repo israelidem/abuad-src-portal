@@ -36,11 +36,31 @@ export function FullPageSpinner({ label = 'Loading…' }) {
  *
  * Preferred over a spinner for lists — it holds the layout so content
  * doesn't jump when it arrives.
+ *
+ * NOTE: the space before `${className}` is load-bearing. Without it the
+ * strings concatenated into `dark:bg-slate-700h-5`, which Tailwind never
+ * emits — so the dark background silently vanished *and* the first
+ * utility passed by the caller was swallowed with it. Since that first
+ * class is usually the height (`h-4`, `h-5`), the skeletons were
+ * collapsing to zero height and the "loading" state rendered as nothing
+ * at all.
  */
 export function Skeleton({ className = '' }) {
-  return <div className={`animate-pulse rounded bg-slate-200 dark:bg-slate-700${className}`} aria-hidden="true" />;
+  return (
+    <div
+      className={`animate-pulse rounded bg-slate-200 dark:bg-slate-700 ${className}`}
+      aria-hidden="true"
+    />
+  );
 }
 
+/**
+ * Mirrors TicketCard's layout so the list doesn't reflow on arrival.
+ *
+ * `role="status"` is on the *container* in each consumer rather than here:
+ * a screen reader announcing "loading" four times for four placeholder
+ * cards is worse than not announcing it at all.
+ */
 export function TicketCardSkeleton() {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">

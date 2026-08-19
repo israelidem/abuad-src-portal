@@ -37,15 +37,46 @@ export const validateFile = (file) => {
 
 /**
  * Uploads one file and returns the attachment payload for the API.
- * Paths are namespaced by user so a Storage policy can restrict writes
- * to a caller's own folder.
+ *
+ * Paths are namespaced by user so a Storage policy can restrict writes to
+ * a caller's own folder — `(storage.foldername(name))[1] = auth.uid()`
+ * in 02_storage.sql.
+ *
+ * That namespacing is a privacy problem for anonymous tickets, though.
+ * The bucket is public-read, so the URL of an attachment is visible to
+ * anyone viewing the ticket — and a path of `<uuid>/photo.jpg` names the
+ * author. Anyone could paste the folder segment into the profiles table
+ * or simply compare it against a known user's other uploads, and the
+ * anonymity the submission form promises would be gone. Worth noting the
+ * ticket API is careful never to return `author` for anonymous tickets;
+ * leaking it through an image URL would undo that work.
+ *
+ * So anonymous uploads go to a per-file random folder instead. The
+ * trade-off is deliberate:
+ *
+ *   - identified uploads keep `<userId>/…`, so the owner-only write and
+ *     delete policies still apply;
+ *   - anonymous uploads land in `anon/<random>/…`, which the write policy
+ *     must allow for any authenticated user (see 09_storage_anonymous.sql).
+ *
+ * The weaker write scope is acceptable because the path is unguessable
+ * and single-use, and every write is still restricted to authenticated
+ * users with the bucket's size and MIME limits enforced by Storage.
+ * Deletion of anonymous attachments moves to the service role, which is
+ * where ticket deletion already happens.
  */
-export const uploadAttachment = async (file, userId) => {
+export const uploadAttachment = async (file, userId, { anonymous = false } = {}) => {
   const error = validateFile(file);
   if (error) throw new Error(error);
 
   const extension = file.name.split('.').pop()?.toLowerCase() ?? 'jpg';
-  const path = `${userId}/${crypto.randomUUID()}.${extension}`;
+
+  // crypto.randomUUID twice for the anonymous case: one segment for the
+  // folder, one for the file, so neither the folder nor the filename can
+  // be correlated back to a user or to the ticket's other attachments.
+  const path = anonymous
+    ? `anon/${crypto.randomUUID()}/${crypto.randomUUID()}.${extension}`
+    : `${userId}/${crypto.randomUUID()}.${extension}`;
 
   const { error: uploadError } = await supabase.storage.from(BUCKET).upload(path, file, {
     cacheControl: '3600',

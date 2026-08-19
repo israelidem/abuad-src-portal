@@ -221,8 +221,22 @@ export const notificationApi = {
 
 export const departmentApi = {
   list: (options) => api.get('/api/departments', { ...options, auth: false }),
-  listAll: (options) => api.get('/api/departments', { ...options, params: { includeInactive: true } }),
+
+  // Admin-only management. The backend already enforced requireAdmin on
+  // all three, and these helpers already existed — what was missing was
+  // any UI, so departments (the routing backbone of every ticket) could
+  // only be changed by someone with direct database access.
+  //
+  // listAll is separate from list() because the public submission form
+  // must never offer a retired desk.
+  listAll: (options) =>
+    api.get('/api/departments', { ...options, params: { includeInactive: true } }),
+
   create: (payload) => api.post('/api/departments', payload),
   update: (id, payload) => api.patch(`/api/departments/${id}`, payload),
+
+  // Deletes only when unreferenced; otherwise the API deactivates it and
+  // reports which happened in `deactivated`. Callers should surface that
+  // distinction rather than claiming "deleted".
   remove: (id) => api.delete(`/api/departments/${id}`),
 };
