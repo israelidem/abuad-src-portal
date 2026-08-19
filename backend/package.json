@@ -24,8 +24,10 @@
     "settings:inspect": "node scripts/inspect-settings.mjs",
     "verify:signup": "node scripts/verify-signup-gate.mjs",
     "verify:tickets": "node scripts/verify-ticket-settings.mjs",
-    "verify:all": "npm run verify:signup && npm run verify:tickets",
-    "sql:generate": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script > prisma/sql/00_schema.sql"
+    "verify:all": "npm run verify:signup && npm run verify:tickets && npm run verify:cache",
+    "sql:generate": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script > prisma/sql/00_schema.sql",
+    "verify:cache": "node scripts/verify-auth-cache.mjs",
+    "measure": "node scripts/measure-latency.mjs"
   },
   "dependencies": {
     "@prisma/client": "^5.15.0",

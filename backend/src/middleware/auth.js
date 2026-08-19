@@ -9,6 +9,41 @@
 import { supabaseAdmin } from '../lib/supabase.js';
 import { prisma } from '../lib/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
+import { getCachedSession, cacheSession } from '../services/authCache.js';
+
+/**
+ * Resolves a bearer token to a profile.
+ *
+ * Both steps are remote calls — token verification is HTTPS to Supabase
+ * Auth (~200ms) and the profile lookup is SQL (~600ms from Lagos, measured
+ * with scripts/measure-latency.mjs). Paid on every request, that dominated
+ * response time for pages that make several calls, which is why the result
+ * is cached for a few seconds. See services/authCache.js for why that is
+ * safe and what invalidates it.
+ *
+ * Only successful resolutions are cached. Failures fall through to the full
+ * check every time, so this can never make a bad token look valid.
+ */
+const resolveSession = async (token) => {
+  const cached = getCachedSession(token);
+  if (cached) return cached;
+
+  const { data, error } = await supabaseAdmin.auth.getUser(token);
+  if (error || !data?.user) throw new ApiError(401, 'Invalid or expired session.');
+
+  const profile = await prisma.profile.findUnique({
+    where: { id: data.user.id },
+  });
+
+  if (!profile) throw new ApiError(401, 'Profile not found.');
+
+  // Checked before caching so a deactivated account is never stored, and
+  // after the lookup so the message stays specific.
+  if (!profile.isActive) throw new ApiError(403, 'This account has been deactivated.');
+
+  cacheSession(token, profile, data.user);
+  return { profile, authUser: data.user };
+};
 
 /**
  * Verifies the Supabase JWT and attaches `req.user` (the profile row).
@@ -21,18 +56,10 @@ export const requireAuth = async (req, _res, next) => {
 
     if (!token) throw new ApiError(401, 'Authentication required.');
 
-    const { data, error } = await supabaseAdmin.auth.getUser(token);
-    if (error || !data?.user) throw new ApiError(401, 'Invalid or expired session.');
-
-    const profile = await prisma.profile.findUnique({
-      where: { id: data.user.id },
-    });
-
-    if (!profile) throw new ApiError(401, 'Profile not found.');
-    if (!profile.isActive) throw new ApiError(403, 'This account has been deactivated.');
+    const { profile, authUser } = await resolveSession(token);
 
     req.user = profile;
-    req.authUser = data.user;
+    req.authUser = authUser;
     next();
   } catch (err) {
     next(err);
@@ -71,14 +98,13 @@ export const optionalAuth = async (req, _res, next) => {
     const token = header.startsWith('Bearer ') ? header.slice(7) : null;
     if (!token) return next();
 
-    const { data, error } = await supabaseAdmin.auth.getUser(token);
-    if (error || !data?.user) return next();
+    // Shares the cache with requireAuth: the public board and the
+    // authenticated pages send the same token, so one page load resolves
+    // the session once regardless of which middleware runs.
+    const { profile, authUser } = await resolveSession(token);
 
-    const profile = await prisma.profile.findUnique({ where: { id: data.user.id } });
-    if (profile?.isActive) {
-      req.user = profile;
-      req.authUser = data.user;
-    }
+    req.user = profile;
+    req.authUser = authUser;
     next();
   } catch {
     next(); // never block a public route on auth failure

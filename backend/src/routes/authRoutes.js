@@ -20,6 +20,7 @@ import { validateBody } from '../middleware/validate.js';
 import { checkEmailDomain, isApprovedDomain } from '../services/domainPolicy.js';
 import { getSettings } from '../services/settingsService.js';
 import { checkSignupAllowed } from '../services/registrationPolicy.js';
+import { invalidateUser } from '../services/authCache.js';
 import {
   signupSchema,
   updateProfileSchema,
@@ -178,6 +179,15 @@ router.patch(
         ...(avatarUrl    !== undefined && { avatarUrl: avatarUrl || null }),
       },
     });
+
+    // After the write, never before: invalidating first leaves a window in
+    // which a concurrent request re-reads and re-caches the *old* row, and
+    // the stale copy then outlives the change it was meant to clear.
+    //
+    // Not a privilege change — role is not editable here, see the field
+    // allow-list in updateProfileSchema — but without this the user's own
+    // edit would appear not to have saved for a few seconds.
+    invalidateUser(req.user.id);
 
     res.json({ profile: updated, message: 'Profile updated.' });
   })

@@ -22,6 +22,7 @@ import {
 } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import { getSettings, updateSettings } from '../services/settingsService.js';
+import { invalidateUser } from '../services/authCache.js';
 import { settingsSchema } from '../validators/settingsSchemas.js';
 import { settingsManifest, toPublicSettings } from '../config/settingsRegistry.js';
 
@@ -254,6 +255,12 @@ router.patch(
       select: { id: true, email: true, fullName: true, role: true, isActive: true },
     });
 
+    // Immediately, and before responding. requireAuth caches resolved
+    // sessions for a few seconds, so without this a demoted admin would
+    // keep admin rights until the TTL lapsed — the exact failure that
+    // turns a cache into a privilege-escalation bug.
+    invalidateUser(user.id);
+
     await audit(req, 'user.role_change', 'Profile', user.id, {
       from: target.role,
       to: req.body.role,
@@ -279,6 +286,10 @@ router.patch(
       data: { isActive: req.body.isActive },
       select: { id: true, email: true, fullName: true, role: true, isActive: true },
     });
+
+    // Same reasoning as the role change: a deactivated account must lose
+    // access now, not once the session cache expires.
+    invalidateUser(user.id);
 
     await audit(req, req.body.isActive ? 'user.reactivate' : 'user.deactivate', 'Profile', user.id);
 
