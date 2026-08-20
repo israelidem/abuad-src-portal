@@ -192,6 +192,30 @@ export const adminApi = {
   /// Flagged tickets awaiting an admin decision.
   moderation: (options) => api.get('/api/admin/moderation', options),
 
+  /// Flagged *comments*, which are a separate queue from flagged tickets:
+  /// tickets are flagged by staff, comments by the automatic filter.
+  moderationComments: (params, options) =>
+    api.get('/api/admin/moderation/comments', { ...options, params }),
+
+  /// action is 'approve' | 'reject' | 'resolve'. One endpoint rather than
+  /// three, because only the target state differs.
+  decideComment: (id, action, reason) =>
+    api.post(`/api/admin/moderation/comments/${id}/decision`, {
+      action,
+      ...(reason ? { reason } : {}),
+    }),
+
+  commentHistory: (id, options) =>
+    api.get(`/api/admin/moderation/comments/${id}/history`, options),
+
+  /// Admin-managed blocklist. Writes take effect on the next comment
+  /// without a redeploy, so the UI can add a term and test it immediately.
+  moderationWords: (options) => api.get('/api/admin/moderation/words', options),
+  addModerationWord: (payload) => api.post('/api/admin/moderation/words', payload),
+  updateModerationWord: (id, payload) =>
+    api.patch(`/api/admin/moderation/words/${id}`, payload),
+  removeModerationWord: (id) => api.delete(`/api/admin/moderation/words/${id}`),
+
   /// Breaks anonymity for one ticket. Requires a reason and is audited
   /// server-side, so this is deliberately not a plain GET.
   revealAuthor: (id, reason) => api.post(`/api/admin/tickets/${id}/reveal`, { reason }),

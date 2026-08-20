@@ -10,6 +10,11 @@
  * The submission form promises students that anonymity holds "except for
  * serious abuse"; this is the only door through which that exception is
  * available, and it writes an audit row on the way through.
+ *
+ * Three sections, because there are three genuinely different jobs: reports
+ * escalated by a human, comments caught by the automatic filter, and the
+ * blocklist that filter reads from. They were merged into one list at first
+ * and it read as a single undifferentiated pile of work.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -20,9 +25,19 @@ import { adminApi, ticketApi } from '../lib/api.js';
 import { useToast } from '../context/ToastContext.jsx';
 import { CATEGORIES } from '../lib/constants.js';
 import { Spinner } from '../components/Spinner.jsx';
+import FlaggedComments from '../components/FlaggedComments.jsx';
+import ModerationWords from '../components/ModerationWords.jsx';
+
+const VIEWS = [
+  { value: 'reports', label: 'Flagged reports' },
+  { value: 'comments', label: 'Flagged comments' },
+  { value: 'words', label: 'Blocked words' },
+];
 
 export default function Moderation() {
   const toast = useToast();
+
+  const [view, setView] = useState('reports');
 
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -117,26 +132,60 @@ export default function Moderation() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex justify-center py-16">
-        <Spinner />
-      </div>
-    );
-  }
-
   return (
     <div className="mx-auto max-w-4xl py-4">
       <h1 className="mb-1 flex items-center gap-2 text-2xl font-semibold text-slate-900 dark:text-white">
         <AlertTriangle size={22} className="text-amber-500" aria-hidden="true" />
         Moderation
       </h1>
-      <p className="mb-6 text-sm text-slate-600 dark:text-slate-400">
-        Reports flagged by staff. Clear the flag if it was raised in error, or remove the
-        report if it breaks the rules.
+      <p className="mb-4 text-sm text-slate-600 dark:text-slate-400">
+        {view === 'reports' &&
+          'Reports flagged by staff. Clear the flag if it was raised in error, or remove the report if it breaks the rules.'}
+        {view === 'comments' &&
+          'Comments the automatic filter stopped. The filter is not infallible — approve anything it caught by mistake.'}
+        {view === 'words' && 'Words and phrases the filter blocks, in addition to the built-in list.'}
       </p>
 
-      {error && (
+      {/* Section switcher. Each section owns its own loading and error state,
+          so switching away from a slow request does not blank the page. */}
+      <div
+        role="tablist"
+        aria-label="Moderation sections"
+        className="mb-6 flex flex-wrap gap-2"
+      >
+        {VIEWS.map((v) => {
+          const active = view === v.value;
+          return (
+            <button
+              key={v.value}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => setView(v.value)}
+              className={`min-h-11 rounded-lg px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#006633] focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 ${
+                active
+                  ? 'bg-[#006633] text-white'
+                  : 'border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800'
+              }`}
+            >
+              {v.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {view === 'comments' && <FlaggedComments />}
+      {view === 'words' && <ModerationWords />}
+
+      {view === 'reports' && (
+        <>
+          {loading ? (
+            <div className="flex justify-center py-16">
+              <Spinner />
+            </div>
+          ) : (
+            <>
+              {error && (
         <div
           role="alert"
           className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300"
@@ -145,7 +194,7 @@ export default function Moderation() {
         </div>
       )}
 
-      {tickets.length === 0 ? (
+              {tickets.length === 0 ? (
         <div className="rounded-xl border border-slate-200 bg-white p-10 text-center dark:border-slate-800 dark:bg-slate-900">
           <ShieldCheck size={32} className="mx-auto mb-3 text-green-600" aria-hidden="true" />
           <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
@@ -300,6 +349,10 @@ export default function Moderation() {
             );
           })}
         </ul>
+              )}
+            </>
+          )}
+        </>
       )}
     </div>
   );

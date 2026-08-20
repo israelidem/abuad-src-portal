@@ -28,6 +28,13 @@ import { invalidateUser } from '../services/authCache.js';
 import { settingsSchema } from '../validators/settingsSchemas.js';
 import { settingsManifest, toPublicSettings } from '../config/settingsRegistry.js';
 import { recordAudit, changes } from '../services/auditService.js';
+import {
+  MODERATION_STATUS,
+  MODERATION_ACTION,
+  normaliseTerm,
+  invalidateWordCache,
+  recordModerationAction,
+} from '../services/moderationService.js';
 
 const router = express.Router();
 
@@ -522,6 +529,402 @@ router.get(
         author: isAnonymous ? null : author,
       })),
     });
+  })
+);
+
+/**
+ * Comment moderation queue.
+ *
+ * Flagging wrote moderation columns from the first commit of this feature,
+ * but nothing read them back — a flagged comment sat in PENDING with no
+ * screen and no endpoint able to resolve it. These routes close that loop.
+ *
+ * Authorisation is `requireAdmin`, matching the ticket queue directly
+ * above rather than inventing a second rule. Comment bodies here can be
+ * abusive by definition and may come from anonymous authors, so this is
+ * not a REP-level surface.
+ */
+
+const queueQuerySchema = z.object({
+  // PENDING first because that is the only actionable state; the other
+  // three are for reviewing what was already decided.
+  status: z
+    .enum([
+      MODERATION_STATUS.PENDING,
+      MODERATION_STATUS.APPROVED,
+      MODERATION_STATUS.REJECTED,
+      MODERATION_STATUS.RESOLVED,
+    ])
+    .default(MODERATION_STATUS.PENDING),
+  page: z.coerce.number().int().min(1).max(500).default(1),
+  // Capped. An unbounded ?limit= is how a moderation list becomes an
+  // accidental full-table export.
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+
+/**
+ * GET /api/admin/moderation/comments?status=&page=&limit=
+ *
+ * Paginated because the queue grows without bound over a term and the
+ * brief explicitly forbids loading every comment into one response.
+ * Served by the (moderation_status, flagged_at) index added in migration 10.
+ */
+router.get(
+  '/moderation/comments',
+  requireAuth,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const parsed = queueQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      throw new ApiError(400, 'Invalid moderation queue filter.');
+    }
+    const { status, page, limit } = parsed.data;
+
+    const where = { moderationStatus: status };
+
+    // Two queries, not N+1: one page of rows plus one count for the pager.
+    const [total, comments] = await Promise.all([
+      prisma.ticketComment.count({ where }),
+      prisma.ticketComment.findMany({
+        where,
+        // flaggedAt is null on rows that were never flagged (APPROVED by
+        // default), so fall back to createdAt to keep ordering stable.
+        orderBy: [{ flaggedAt: 'desc' }, { createdAt: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          body: true,
+          createdAt: true,
+          flaggedAt: true,
+          moderationStatus: true,
+          moderationReason: true,
+          moderationCategories: true,
+          moderationSeverity: true,
+          isHidden: true,
+          moderatedAt: true,
+          isInternal: true,
+          author: { select: { id: true, fullName: true, role: true } },
+          moderatedBy: { select: { id: true, fullName: true } },
+          ticket: {
+            select: { id: true, ticketNumber: true, title: true, isAnonymous: true },
+          },
+        },
+      }),
+    ]);
+
+    res.json({
+      comments: comments.map(({ ticket, author, ...c }) => ({
+        ...c,
+        ticket,
+        // An anonymous ticket's comment thread inherits that anonymity.
+        // Revealing the author here would be a back door around the
+        // audited /tickets/:id/reveal step below.
+        author: ticket?.isAnonymous ? null : author,
+      })),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    });
+  })
+);
+
+const decisionSchema = z.object({
+  action: z.enum(['approve', 'reject', 'resolve']),
+  reason: z.string().trim().max(500).optional(),
+});
+
+/**
+ * POST /api/admin/moderation/comments/:id/decision
+ *
+ * One endpoint for all three outcomes rather than three near-identical
+ * ones, because the surrounding work — load, authorise, update, write the
+ * audit row — is identical and only the target state differs.
+ *
+ *   approve  the filter was wrong (or the comment is acceptable) → visible
+ *   reject   the comment stays hidden; this is the removal path
+ *   resolve  reviewed and handled; visibility deliberately unchanged
+ */
+router.post(
+  '/moderation/comments/:id/decision',
+  requireAuth,
+  requireAdmin,
+  adminWriteLimiter,
+  validateBody(decisionSchema),
+  asyncHandler(async (req, res) => {
+    const { action, reason } = req.body;
+
+    // Rejecting removes a student's words from a thread. That needs a
+    // recorded justification, the same standard the reveal route holds.
+    if (action === 'reject' && (!reason || reason.length < 5)) {
+      throw new ApiError(400, 'Record why this comment is being removed.');
+    }
+
+    const comment = await prisma.ticketComment.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, moderationStatus: true, isHidden: true },
+    });
+
+    if (!comment) throw new ApiError(404, 'Comment not found.');
+
+    const next = {
+      approve: { moderationStatus: MODERATION_STATUS.APPROVED, isHidden: false },
+      reject: { moderationStatus: MODERATION_STATUS.REJECTED, isHidden: true },
+      // Visibility is left as-is: a resolved case may legitimately be
+      // either hidden or visible, and guessing would silently republish
+      // something a moderator hid on purpose.
+      resolve: { moderationStatus: MODERATION_STATUS.RESOLVED, isHidden: comment.isHidden },
+    }[action];
+
+    const updated = await prisma.ticketComment.update({
+      where: { id: comment.id },
+      data: {
+        ...next,
+        moderatedById: req.user.id,
+        moderatedAt: new Date(),
+      },
+      select: { id: true, moderationStatus: true, isHidden: true, moderatedAt: true },
+    });
+
+    // Audit trail. Best-effort inside the service: losing history must not
+    // undo a decision the moderator already made.
+    await recordModerationAction({
+      commentId: comment.id,
+      actorId: req.user.id,
+      actorRole: req.user.role,
+      action: {
+        approve: MODERATION_ACTION.APPROVED,
+        reject: MODERATION_ACTION.REJECTED,
+        resolve: MODERATION_ACTION.RESOLVED,
+      }[action],
+      reason: reason ?? null,
+      fromStatus: comment.moderationStatus,
+      toStatus: updated.moderationStatus,
+    });
+
+    res.json({ comment: updated });
+  })
+);
+
+/**
+ * GET /api/admin/moderation/comments/:id/history
+ *
+ * The audit trail for one comment: who decided what, when, and why.
+ */
+router.get(
+  '/moderation/comments/:id/history',
+  requireAuth,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const actions = await prisma.moderationAction.findMany({
+      where: { commentId: req.params.id },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      select: {
+        id: true,
+        action: true,
+        reason: true,
+        fromStatus: true,
+        toStatus: true,
+        actorRole: true,
+        createdAt: true,
+        actor: { select: { id: true, fullName: true } },
+      },
+    });
+
+    res.json({ actions });
+  })
+);
+
+/**
+ * Admin-managed blocked words.
+ *
+ * The built-in list stays in version control; this table holds the
+ * additions admins make at runtime. Every write invalidates the word
+ * cache so the change applies to the next comment — the brief's
+ * "no code deployment or restart" requirement.
+ */
+
+const wordSchema = z.object({
+  term: z.string().trim().min(2, 'Enter the word or phrase to block.').max(120),
+  category: z
+    .enum(['PROFANITY', 'HATE_SPEECH', 'THREAT', 'SEXUAL', 'SELF_HARM', 'HARASSMENT', 'CUSTOM'])
+    .default('CUSTOM'),
+  severity: z.enum(['low', 'medium', 'high']).default('medium'),
+  isEnabled: z.boolean().default(true),
+  notes: z.string().trim().max(500).nullable().optional(),
+});
+
+// Edits arrive as partials, so every field is optional — but an empty body
+// is a mistake, not a no-op update.
+const wordPatchSchema = wordSchema.partial().refine(
+  (v) => Object.keys(v).length > 0,
+  'Nothing to update.'
+);
+
+/**
+ * Guards against a term that would flag everything.
+ *
+ * "a" or "!!" normalise to something so short that the tolerant matcher
+ * would fire on ordinary sentences, and the first symptom would be every
+ * comment in the portal landing in the queue at once. Cheaper to refuse
+ * here than to explain later.
+ */
+const assertUsableTerm = (term) => {
+  const normalised = normaliseTerm(term);
+  if (normalised.length < 3) {
+    throw new ApiError(
+      400,
+      'That term is too short or has no letters — it would flag ordinary comments.'
+    );
+  }
+  return normalised;
+};
+
+router.get(
+  '/moderation/words',
+  requireAuth,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const words = await prisma.moderationWord.findMany({
+      orderBy: { createdAt: 'desc' },
+      // Bounded. The list is admin-curated and small; a cap still keeps a
+      // runaway import from becoming a multi-megabyte response.
+      take: 500,
+      select: {
+        id: true,
+        term: true,
+        category: true,
+        severity: true,
+        isEnabled: true,
+        notes: true,
+        createdAt: true,
+        updatedAt: true,
+        createdBy: { select: { id: true, fullName: true } },
+      },
+    });
+
+    res.json({ words });
+  })
+);
+
+router.post(
+  '/moderation/words',
+  requireAuth,
+  requireAdmin,
+  adminWriteLimiter,
+  validateBody(wordSchema),
+  asyncHandler(async (req, res) => {
+    const { term, category, severity, isEnabled, notes } = req.body;
+    const normalised = assertUsableTerm(term);
+
+    try {
+      const word = await prisma.moderationWord.create({
+        data: {
+          term,
+          normalised,
+          category,
+          severity,
+          isEnabled,
+          notes: notes ?? null,
+          createdById: req.user.id,
+        },
+        select: { id: true, term: true, category: true, severity: true, isEnabled: true },
+      });
+
+      // Immediately, and before responding: an admin who adds a word and
+      // then tests it must see it take effect.
+      invalidateWordCache();
+
+      // Positional signature: (req, action, entityType, entityId, metadata).
+      // Metadata is the term only, not the whole row — enough to answer
+      // "who blocked this word" without copying abuse into the audit log.
+      await audit(req, 'moderation.word_added', 'ModerationWord', word.id, {
+        term: word.term,
+        category,
+        severity,
+      });
+
+      res.status(201).json({ word });
+    } catch (error) {
+      // Unique on `normalised`, so "Idiot" and "idiot " collide by design.
+      if (error?.code === 'P2002') {
+        throw new ApiError(409, 'That word or phrase is already on the list.');
+      }
+      throw error;
+    }
+  })
+);
+
+router.patch(
+  '/moderation/words/:id',
+  requireAuth,
+  requireAdmin,
+  adminWriteLimiter,
+  validateBody(wordPatchSchema),
+  asyncHandler(async (req, res) => {
+    const existing = await prisma.moderationWord.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, term: true, category: true, severity: true, isEnabled: true, notes: true },
+    });
+    if (!existing) throw new ApiError(404, 'Word not found.');
+
+    const data = { ...req.body };
+    // Keep `normalised` consistent with `term`, or the uniqueness
+    // guarantee quietly stops holding after the first edit.
+    if (data.term !== undefined) data.normalised = assertUsableTerm(data.term);
+
+    try {
+      const word = await prisma.moderationWord.update({
+        where: { id: existing.id },
+        data,
+        select: {
+          id: true,
+          term: true,
+          category: true,
+          severity: true,
+          isEnabled: true,
+          notes: true,
+        },
+      });
+
+      invalidateWordCache();
+
+      await audit(req, 'moderation.word_updated', 'ModerationWord', word.id, changes(existing, word));
+
+      res.json({ word });
+    } catch (error) {
+      if (error?.code === 'P2002') {
+        throw new ApiError(409, 'Another entry already covers that word or phrase.');
+      }
+      throw error;
+    }
+  })
+);
+
+router.delete(
+  '/moderation/words/:id',
+  requireAuth,
+  requireAdmin,
+  adminWriteLimiter,
+  asyncHandler(async (req, res) => {
+    const existing = await prisma.moderationWord.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, term: true },
+    });
+    if (!existing) throw new ApiError(404, 'Word not found.');
+
+    await prisma.moderationWord.delete({ where: { id: existing.id } });
+    invalidateWordCache();
+
+    await audit(req, 'moderation.word_deleted', 'ModerationWord', existing.id, {
+      term: existing.term,
+    });
+
+    res.status(204).end();
   })
 );
 

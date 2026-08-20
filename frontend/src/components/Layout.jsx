@@ -23,12 +23,14 @@ import {
   ShieldAlert,
   ChevronDown,
   Building2,
+  Code2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { adminApi } from '../lib/api.js';
 import Logo from './Logo.jsx';
 import NotificationBell from './NotificationBell.jsx';
 import ThemeToggle from './ThemeToggle.jsx';
+import ContactDeveloper from './ContactDeveloper.jsx';
 
 const FOREST_GREEN = '#006633';
 
@@ -137,6 +139,11 @@ export default function Layout() {
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [maintenance, setMaintenance] = useState(null);
+
+  // Lives in the shell rather than the footer so the dialog renders as a
+  // sibling of <footer>, not inside it — a fixed-position child of a
+  // bordered footer inherits stacking context and clips oddly on iOS.
+  const [contactOpen, setContactOpen] = useState(false);
 
   // Public endpoint, so the banner also shows on the sign-in page — which
   // is exactly where someone who can't submit will end up looking.
@@ -379,8 +386,24 @@ export default function Layout() {
               src@abuad.edu.ng
             </a>
           </p>
+
+          {/* Separate from the SRC address above on purpose: students were
+              emailing the council about broken pages, which is a different
+              queue from a portal bug. */}
+          <p className="mt-2">
+            <button
+              type="button"
+              onClick={() => setContactOpen(true)}
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-slate-600 underline decoration-1 underline-offset-2 hover:text-[#006633] hover:no-underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#006633] dark:text-slate-400 dark:hover:text-green-400"
+            >
+              <Code2 size={14} aria-hidden="true" />
+              Contact developer
+            </button>
+          </p>
         </div>
       </footer>
+
+      <ContactDeveloper open={contactOpen} onClose={() => setContactOpen(false)} />
     </div>
   );
 }
