@@ -13,6 +13,7 @@ import { adminApi } from '../lib/api.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 import { Spinner } from '../components/Spinner.jsx';
+import AddUserDialog from '../components/AddUserDialog.jsx';
 
 const ROLES = ['STUDENT', 'REP', 'ADMIN', 'SUPER_ADMIN'];
 
@@ -34,12 +35,17 @@ export default function UserManagement() {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
+  const [addOpen, setAddOpen] = useState(false);
 
   const load = useCallback(
     async (signal) => {
       setLoading(true);
       try {
-        const data = await adminApi.users({ page, q: query || undefined }, { signal });
+        // `search`, not `q`. The API reads `req.query.search` — this sent
+        // `q` and had done since the page was written, so the search box
+        // silently returned the unfiltered list and looked like it had
+        // simply found everything.
+        const data = await adminApi.users({ page, search: query || undefined }, { signal });
         setUsers(data.users);
         setPagination(data.pagination);
       } catch (err) {
@@ -98,9 +104,47 @@ export default function UserManagement() {
   const canManage = (user) =>
     user.id !== profile?.id && (user.role !== 'SUPER_ADMIN' || isSuperAdmin);
 
+  /**
+   * A new account belongs at the top of an unfiltered first page, and
+   * nowhere else. Prepending it while a search or a later page is showing
+   * would put a row in front of the admin that does not match what they
+   * asked for, so reload instead and let the server decide.
+   */
+  const handleCreated = () => {
+    if (page === 1 && !query) load();
+    else {
+      setPage(1);
+      setQuery('');
+      setSearch('');
+    }
+  };
+
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
-      <h1 className="mb-6 text-2xl font-bold text-slate-900 dark:text-white">Users</h1>
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Users</h1>
+
+        {/* Super admin only. The endpoint refuses everyone else, so showing
+            this to an ADMIN would only offer them a 403. */}
+        {isSuperAdmin && (
+          <button
+            type="button"
+            onClick={() => setAddOpen(true)}
+            className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Add New User
+          </button>
+        )}
+      </div>
+
+      {/* Mounted only while open, so each visit starts from a blank form
+          without the dialog having to reset itself. */}
+      {addOpen && (
+        <AddUserDialog onClose={() => setAddOpen(false)} onCreated={handleCreated} />
+      )}
 
       <form onSubmit={submitSearch} className="mb-4 flex gap-2">
         <input

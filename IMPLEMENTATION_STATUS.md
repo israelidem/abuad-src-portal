@@ -152,7 +152,82 @@ iOS.
 change, which confirms the component is genuinely bundled and not tree-shaken.
 ESLint clean on both files.
 
-### 7. Authorization — verified by probe, not by reading
+### 7. Super Admin manual registration — done
+
+`POST /api/admin/users` in `adminRoutes.js`, plus
+`backend/tests/adminUserCreation.test.mjs`.
+
+Guarded by `requireSuperAdmin`, **not** `requireAdmin`. This endpoint can
+mint another SUPER_ADMIN, so exposing it to ordinary admins would convert
+"manage users" into a privilege-escalation path: an admin creates a second
+account at SUPER_ADMIN and logs into it.
+
+What it deliberately does *not* call is the interesting part. There is no
+`checkSignupAllowed` and no `checkEmailDomain`. Both police self-service
+registration by strangers; applying them here would defeat the feature, which
+exists precisely for when the public gate is shut. A super admin onboarding a
+guest lecturer on an external address is a decision they are trusted to make.
+Two tests assert those calls stay absent, because the plausible regression is
+someone "tidying up" by making this route consistent with the public one — at
+which point the feature silently stops working, and only while signups happen
+to be closed.
+
+Other properties pinned by test: auth runs before the role check; the route is
+rate-limited; the matric-number duplicate check runs *before* the Supabase
+call (finding the clash afterwards would strand an orphaned auth user and make
+the corrected retry fail with "email already registered"); no password is ever
+selected into the response; the raw Supabase user object is never returned;
+a duplicate email maps to 409 rather than a bare auth error.
+
+**Evidence:** 12/12 pass. Full suite **197/197, 0 fail** — the previous 185
+plus these 12, so nothing regressed.
+
+Worth recording honestly: **the first two versions of that test file failed,
+5 and then 4 assertions.** Both were faults in my test, not the route.
+Version one read `handle.name` off the Express layer stack and got
+`requireAuth, , , ,` — middleware built by factories (`validateBody(schema)`,
+the limiter) are anonymous closures, so four real guards were indistinguishable
+from four missing ones. Version two matched a multi-line `\n` marker against a
+CRLF file and located nothing. Had I written those tests and not run them, the
+first would have been a green test asserting almost nothing.
+
+**Frontend:** `Add New User` in `frontend/src/pages/UserManagement.jsx`, opening
+`frontend/src/components/AddUserDialog.jsx`.
+
+The button renders only for `isSuperAdmin`. That is presentation, not a
+control — the endpoint refuses everyone else regardless. It is hidden so an
+ADMIN is not offered a button that can only return 403.
+
+Password handling is the part worth explaining. The field is pre-filled with a
+crypto-random 16-character value and there is a Regenerate button, because an
+admin asked to invent a password on the spot reliably invents a weak one that
+then gets reused. It is `type="password"` with a Show toggle rather than
+plain text: the admin has to read it aloud to hand it over, but not with a
+class of students behind them.
+
+Server errors are placed on the field they belong to instead of a toast — a
+409 on a duplicate email marks the email input, and `matric` in the message
+routes it to the matric field. The message never says which account holds the
+value, because the server does not disclose that either.
+
+The dialog is mounted only while open (`{addOpen && <AddUserDialog…>}`) rather
+than mounted-and-hidden. A permanently mounted dialog has to blank its own
+fields on open, which means calling setState inside an effect; ESLint's
+`react-hooks/set-state-in-effect` rejected exactly that in my first version.
+Mounting fresh gives a clean form for free.
+
+**A pre-existing bug fixed on the way past:** the search box sent `?q=`, but
+`GET /api/admin/users` reads `req.query.search`. Searching therefore returned
+the unfiltered list — and because a list came back, it looked like a search
+that had matched everything rather than a filter that was never applied.
+Nothing about this task required touching it; it was visible while reading the
+fetch call.
+
+**Evidence:** `npm run build` → **2436** modules (2435 before), with the dialog
+bundled into `dist/assets/UserManagement-*.js` (14.33 kB) — so it is genuinely
+reachable and not tree-shaken. ESLint clean on all three changed files.
+
+### 8. Authorization — verified by probe, not by reading
 
 `backend/scripts/verify-moderation-api.mjs` exercises every new moderation
 endpoint as anonymous, student, and admin. **40/40 checks passed**: anonymous
@@ -168,8 +243,6 @@ These are outstanding. I am not going to describe unwritten code as finished.
 
 - **Cloudinary migration (§4).** Uploads still use the existing Supabase
   Storage path in `frontend/src/lib/uploads.js`. Not begun.
-- **Super Admin manual registration (§6).** No `Add New User` button, no
-  endpoint. Not begun.
 - **Feedback tab (§9).** Not begun.
 - **In-app rating prompt (§10).** Not begun.
 
@@ -199,15 +272,16 @@ deployed target — none of which is set up in this repo yet.
 ## Verification commands
 
 ```bash
-cd backend && npm test                          # 185/185 pass, 0 fail
+cd backend && npm test                          # 197/197 pass, 0 fail
 cd backend && node scripts/verify-moderation-api.mjs   # 40/40 authz checks
-cd frontend && npm run build                    # 2435 modules, clean
+cd frontend && npm run build                    # 2436 modules, clean
 cd frontend && npx eslint src/components/FlaggedComments.jsx \
   src/components/ModerationWords.jsx src/pages/Moderation.jsx \
-  src/components/ContactDeveloper.jsx src/components/Layout.jsx  # clean
+  src/components/ContactDeveloper.jsx src/components/Layout.jsx \
+  src/components/AddUserDialog.jsx src/pages/UserManagement.jsx  # clean
 ```
 
-Regression check: the 185 include the pre-existing suites (ticket visibility,
+Regression check: the 197 include the pre-existing suites (ticket visibility,
 identity uniqueness, signup control, settings registry, auth cache,
 observability). No existing test was weakened or removed to get green.
 

@@ -12,6 +12,9 @@ import express from 'express';
 import { z } from 'zod';
 
 import { prisma } from '../lib/prisma.js';
+// Needed by POST /users: account creation goes through Supabase Auth, the
+// same path public signup uses, so both produce identical auth records.
+import { supabaseAdmin } from '../lib/supabase.js';
 import { ApiError } from '../utils/ApiError.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import {
@@ -152,6 +155,123 @@ const roleSchema = z.object({
 });
 
 const activeSchema = z.object({ isActive: z.boolean() });
+
+/**
+ * Manual account creation by a SUPER_ADMIN.
+ *
+ * Deliberately stricter than the public signup schema in one respect —
+ * `role` is accepted here and rejected there. Public signup strips any
+ * client-supplied role (see identityUniqueness.test.mjs); this endpoint is
+ * the only path that may set one, and only for a SUPER_ADMIN.
+ */
+const createUserSchema = z.object({
+  email: z.string().trim().toLowerCase().email().max(255),
+  // 12 rather than the public minimum: an account minted for someone else
+  // is handed over out-of-band, so it should not also be weak.
+  password: z.string().min(12).max(128),
+  fullName: z.string().trim().min(2).max(120),
+  role: z.enum(['STUDENT', 'REP', 'ADMIN', 'SUPER_ADMIN']).default('STUDENT'),
+  matricNumber: z.string().trim().max(50).optional().or(z.literal('')),
+  faculty: z.string().trim().max(120).optional().or(z.literal('')),
+  department: z.string().trim().max(120).optional().or(z.literal('')),
+});
+
+/**
+ * POST /api/admin/users
+ *
+ * Creates an account when public registration is closed.
+ *
+ * SUPER_ADMIN only, not requireAdmin: this endpoint can mint another
+ * SUPER_ADMIN, so allowing plain admins here would turn "manage users" into
+ * a privilege-escalation path.
+ *
+ * Note what is intentionally *absent*: no `checkSignupAllowed`, and no
+ * `checkEmailDomain`. Both exist to police self-service registration by
+ * strangers. Applying them here would defeat the entire purpose — the
+ * feature is specifically for the case where the public gate is shut, and a
+ * super admin onboarding a guest lecturer on an external address is a
+ * decision they are trusted to make.
+ */
+router.post(
+  '/users',
+  requireAuth,
+  requireSuperAdmin,
+  adminWriteLimiter,
+  validateBody(createUserSchema),
+  asyncHandler(async (req, res) => {
+    const { email, password, fullName, role, matricNumber, faculty, department } = req.body;
+
+    // Same ordering as public signup, for the same reason: a duplicate
+    // matric number found *after* the auth user exists would leave an
+    // orphan, and the corrected retry would then fail on "email already
+    // registered" — a confusing dead end for whoever is being onboarded.
+    if (matricNumber) {
+      const clash = await prisma.profile.findUnique({ where: { matricNumber } });
+      if (clash) throw new ApiError(409, 'That matric number is already registered.');
+    }
+
+    const { data, error } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      // Confirmed on creation: the account is being made *for* someone by
+      // an authenticated super admin, so there is no address to verify and
+      // no reason to make them wait on an email that may never arrive.
+      email_confirm: true,
+      user_metadata: {
+        full_name: fullName,
+        matric_number: matricNumber || null,
+        faculty: faculty || null,
+      },
+    });
+
+    if (error) {
+      if (/already registered|already been registered/i.test(error.message)) {
+        throw new ApiError(409, 'An account with this email already exists.');
+      }
+      throw new ApiError(400, error.message);
+    }
+
+    // The DB trigger creates the profile row with the default role, so the
+    // requested role is applied here as an update rather than an insert.
+    const profile = await prisma.profile.update({
+      where: { id: data.user.id },
+      data: {
+        role,
+        department: department || null,
+        // Manually created accounts are active immediately; an inactive
+        // account the admin then has to go and enable is a pointless step.
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        matricNumber: true,
+        faculty: true,
+        department: true,
+        isActive: true,
+        createdAt: true,
+      },
+    });
+
+    // Who created whom, and with what role. Manual creation of a privileged
+    // account is exactly the event an audit trail exists to capture.
+    //
+    // Positional signature — (req, action, entityType, entityId, metadata) —
+    // matching every other audit call in this file. The email is recorded
+    // because "which account was created" is the first question asked; the
+    // password obviously is not.
+    await audit(req, 'user.created_by_admin', 'Profile', profile.id, {
+      email: profile.email,
+      role,
+    });
+
+    // No password echoed back, not even the one just supplied: it would
+    // land in browser devtools, any proxy log, and the response cache.
+    res.status(201).json({ user: profile });
+  })
+);
 
 router.get(
   '/users',

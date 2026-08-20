@@ -221,6 +221,14 @@ export const adminApi = {
   revealAuthor: (id, reason) => api.post(`/api/admin/tickets/${id}/reveal`, { reason }),
 
   users: (params, options) => api.get('/api/admin/users', { ...options, params }),
+  /**
+   * Manual account creation, SUPER_ADMIN only.
+   *
+   * The role travels in the body and is enforced server-side; sending
+   * SUPER_ADMIN from a plain admin session is refused with 403 rather than
+   * quietly downgraded, so the UI must not offer what the caller cannot do.
+   */
+  createUser: (payload) => api.post('/api/admin/users', payload),
   setUserRole: (id, role) => api.patch(`/api/admin/users/${id}/role`, { role }),
   setUserStatus: (id, isActive) => api.patch(`/api/admin/users/${id}/status`, { isActive }),
 
