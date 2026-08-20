@@ -15,7 +15,8 @@ import { prisma } from '../lib/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAuth } from '../middleware/auth.js';
-import { authLimiter } from '../middleware/rateLimiter.js';
+import { authLimiter, emailCheckLimiter } from '../middleware/rateLimiter.js';
+
 import { validateBody } from '../middleware/validate.js';
 import { checkEmailDomain, isApprovedDomain } from '../services/domainPolicy.js';
 import { getSettings } from '../services/settingsService.js';
@@ -36,8 +37,13 @@ const router = express.Router();
  */
 router.post(
   '/check-email',
-  authLimiter,
+  // Not the strict authLimiter: the signup form calls this while the user
+  // is still typing, so a 10/15min budget shared across a campus NAT would
+  // break the form for everyone. emailCheckLimiter is still IP-keyed to
+  // stop the endpoint being farmed for "which emails are registered".
+  emailCheckLimiter,
   validateBody(checkEmailSchema),
+
   asyncHandler(async (req, res) => {
     const { allowed, reason } = await checkEmailDomain(req.body.email);
     res.json({ allowed, reason: reason ?? null });

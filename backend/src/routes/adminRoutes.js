@@ -21,6 +21,8 @@ import {
   requireSuperAdmin,
 } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
+import { adminWriteLimiter } from '../middleware/rateLimiter.js';
+
 import { getSettings, updateSettings } from '../services/settingsService.js';
 import { invalidateUser } from '../services/authCache.js';
 import { settingsSchema } from '../validators/settingsSchemas.js';
@@ -70,7 +72,12 @@ router.patch(
   '/settings',
   requireAuth,
   requireSuperAdmin,
+  // Not about distrusting super admins: it caps the blast radius if a
+  // privileged session is stolen, and stops a looping script from
+  // rewriting portal-wide config hundreds of times.
+  adminWriteLimiter,
   validateBody(settingsSchema),
+
   asyncHandler(async (req, res) => {
     // Read once, up front: needed both for the domain guard below and as
     // the "previous value" side of the audit diff. Without it the trail
@@ -234,7 +241,9 @@ router.patch(
   '/users/:id/role',
   requireAuth,
   requireAdmin,
+  adminWriteLimiter,
   validateBody(roleSchema),
+
   asyncHandler(async (req, res) => {
     const target = await prisma.profile.findUnique({ where: { id: req.params.id } });
     assertCanManage(req.user, target);
@@ -274,7 +283,9 @@ router.patch(
   '/users/:id/status',
   requireAuth,
   requireAdmin,
+  adminWriteLimiter,
   validateBody(activeSchema),
+
   asyncHandler(async (req, res) => {
     const target = await prisma.profile.findUnique({ where: { id: req.params.id } });
     assertCanManage(req.user, target);
@@ -535,7 +546,12 @@ router.post(
   '/tickets/:id/reveal',
   requireAuth,
   requireAdmin,
+  // De-anonymisation is the most sensitive action in the portal, so it is
+  // also rate-limited: a stolen admin session should not be able to
+  // enumerate the authors of every anonymous ticket in one burst.
+  adminWriteLimiter,
   validateBody(revealSchema),
+
   asyncHandler(async (req, res) => {
     const ticket = await prisma.ticket.findUnique({
       where: { id: req.params.id },

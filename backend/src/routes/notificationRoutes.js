@@ -12,7 +12,9 @@ import { prisma } from '../lib/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAuth } from '../middleware/auth.js';
+import { notificationLimiter } from '../middleware/rateLimiter.js';
 import { validateBody, validateQuery } from '../middleware/validate.js';
+
 import { env } from '../config/env.js';
 import { pushEnabled } from '../services/pushService.js';
 import {
@@ -39,7 +41,11 @@ router.get(
 router.get(
   '/',
   requireAuth,
+  // After requireAuth so the limiter keys on the account, not the campus
+  // NAT the student happens to be behind.
+  notificationLimiter,
   validateQuery(listNotificationsQuerySchema),
+
   asyncHandler(async (req, res) => {
     const { page, limit, unreadOnly } = req.query;
     const where = { userId: req.user.id, ...(unreadOnly ? { isRead: false } : {}) };
@@ -75,7 +81,9 @@ router.get(
 router.patch(
   '/read-all',
   requireAuth,
+  notificationLimiter,
   asyncHandler(async (req, res) => {
+
     const { count } = await prisma.notification.updateMany({
       where: { userId: req.user.id, isRead: false },
       data: { isRead: true },
@@ -89,7 +97,9 @@ router.patch(
 router.patch(
   '/:id/read',
   requireAuth,
+  notificationLimiter,
   asyncHandler(async (req, res) => {
+
     // userId in the where clause means another user's ID simply matches
     // nothing — no separate ownership check, and no way to probe for the
     // existence of someone else's notification.
@@ -118,7 +128,9 @@ router.patch(
 router.post(
   '/subscribe',
   requireAuth,
+  notificationLimiter,
   validateBody(pushSubscribeSchema),
+
   asyncHandler(async (req, res) => {
     if (!pushEnabled) {
       throw new ApiError(503, 'Push notifications are not configured on this server.');

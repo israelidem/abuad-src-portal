@@ -244,19 +244,45 @@ export default function Layout() {
             )}
           </div>
 
-          <button
-            type="button"
-            onClick={() => setMenuOpen((v) => !v)}
-            className="rounded-lg p-2 text-white md:hidden"
-            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
-            aria-expanded={menuOpen}
-          >
-            {menuOpen ? <X size={22} /> : <Menu size={22} />}
-          </button>
+          {/*
+            Mobile header controls.
+            ----------------------
+            The bell used to live only in the `hidden md:flex` cluster
+            above, so below 768px it was display:none — and the collapsed
+            menu never rendered it either. On a phone the notification
+            feature simply did not exist, which is the reported bug.
+
+            It sits outside the collapsible menu deliberately: an unread
+            badge is only useful if it is visible without first opening a
+            menu, and it is the one control students check most often.
+          */}
+          <div className="flex items-center gap-1 md:hidden">
+            {isAuthenticated && <NotificationBell />}
+
+            <button
+              type="button"
+              onClick={() => setMenuOpen((v) => !v)}
+              // h-11/w-11 to match the bell: two adjacent 44px targets
+              // cannot be mis-tapped for one another the way a 34px pair
+              // can.
+              className="flex h-11 w-11 items-center justify-center rounded-lg text-white"
+              aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={menuOpen}
+              aria-controls="mobile-nav"
+            >
+              {menuOpen ? <X size={22} /> : <Menu size={22} />}
+            </button>
+          </div>
+
         </div>
 
         {menuOpen && (
-          <nav className="border-t border-white/10 px-4 pb-4 md:hidden" aria-label="Mobile">
+          <nav
+            id="mobile-nav"
+            className="border-t border-white/10 px-4 pb-4 md:hidden"
+            aria-label="Mobile"
+          >
+
             <div className="flex flex-col gap-1 pt-3">
               {visible.map(({ to, label, icon: Icon }) => (
                 <NavLink

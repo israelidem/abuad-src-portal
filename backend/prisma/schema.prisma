@@ -118,6 +118,14 @@ model Profile {
 
   settingsUpdates   AppSettings[]
 
+  /// Moderation back-relations. Named because Profile already has an
+  /// unnamed relation to TicketComment (`comments`, the author side), and
+  /// Prisma cannot infer which side a second link belongs to.
+  moderatedComments TicketComment[]    @relation("CommentModerator")
+  moderationWords   ModerationWord[]   @relation("ModerationWordAuthor")
+  moderationActions ModerationAction[] @relation("ModerationActor")
+
+
   /// Which SRC desk this rep/admin staffs — deliberately *not* the
   /// `department` field above, which is the student's own academic
   /// department as free text. Null for students and for staff who handle
@@ -249,9 +257,91 @@ model TicketComment {
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
+  /// Automatic moderation state. See 10_comment_moderation.sql.
+  ///
+  /// APPROVED by default so a comment the filter never objects to — and
+  /// every comment that predates this feature — is already in a terminal
+  /// state and never shows up in the moderation queue.
+  ///
+  /// APPROVED | PENDING | REJECTED | RESOLVED (CHECK-constrained in SQL)
+  moderationStatus     String    @default("APPROVED") @map("moderation_status")
+  /// Human-readable explanation naming the matched terms, so a moderator
+  /// can judge whether the filter was right. Staff-only.
+  moderationReason     String?   @map("moderation_reason")
+  moderationCategories String[]  @default([]) @map("moderation_categories")
+  moderationSeverity   String?   @map("moderation_severity")
+  /// Visibility, deliberately separate from status: a high-severity match
+  /// is hidden pending review, a medium match stays visible but queued.
+  isHidden             Boolean   @default(false) @map("is_hidden")
+  moderatedById        String?   @map("moderated_by") @db.Uuid
+  moderatedBy          Profile?  @relation("CommentModerator", fields: [moderatedById], references: [id], onDelete: SetNull)
+  moderatedAt          DateTime? @map("moderated_at")
+  flaggedAt            DateTime? @map("flagged_at")
+
+  moderationActions ModerationAction[]
+
   @@index([ticketId, createdAt])
+  /// Backs the moderation queue: status + newest-first.
+  @@index([moderationStatus, flaggedAt])
+  /// Backs per-ticket rendering with hidden rows filtered out.
+  @@index([ticketId, isHidden, createdAt])
   @@map("ticket_comments")
 }
+
+/// Admin-managed blocklist entries.
+///
+/// Exists as a table rather than a config constant because the brief
+/// requires custom words to take effect without a deploy or restart.
+/// The built-in list stays in src/config/moderationWordlist.js, where it
+/// is version-controlled and reviewable.
+model ModerationWord {
+  id         String   @id @default(uuid()) @db.Uuid
+  /// As the admin typed it — shown in the UI and used for editing.
+  term       String
+  /// Normalised form, uniquely indexed so "Idiot", "idiot " and "1d10t"
+  /// cannot be stored as three rows that all mean the same thing.
+  normalised String   @unique
+  category   String   @default("CUSTOM")
+  severity   String   @default("medium")
+  /// Disable rather than delete, so a term that caused false positives
+  /// can be switched off while keeping the record of who added it.
+  isEnabled  Boolean  @default(true) @map("is_enabled")
+  notes      String?
+  createdById String? @map("created_by") @db.Uuid
+  createdBy   Profile? @relation("ModerationWordAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([isEnabled])
+  @@map("moderation_words")
+}
+
+/// Audit trail of moderation decisions, queryable per comment.
+///
+/// Separate from AuditLog because these rows answer "what happened to
+/// this comment" and are shown to moderators, whereas AuditLog is an
+/// append-only firehose keyed by actor.
+model ModerationAction {
+  id         String        @id @default(uuid()) @db.Uuid
+  commentId  String        @map("comment_id") @db.Uuid
+  comment    TicketComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  /// SetNull, not Cascade: deleting an account must not erase the record
+  /// of what that moderator decided.
+  actorId    String?       @map("actor_id") @db.Uuid
+  actor      Profile?      @relation("ModerationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  /// Denormalised so a later demotion does not rewrite history.
+  actorRole  String?       @map("actor_role")
+  /// AUTO_FLAGGED | APPROVED | REJECTED | RESOLVED | HIDDEN | UNHIDDEN
+  action     String
+  reason     String?
+  fromStatus String?       @map("from_status")
+  toStatus   String?       @map("to_status")
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  @@index([commentId, createdAt])
+  @@map("moderation_actions")
+}
+
 
 /// Immutable audit timeline: "Pending → In Progress by Rep. Ada, 12 Mar"
 model TicketEvent {

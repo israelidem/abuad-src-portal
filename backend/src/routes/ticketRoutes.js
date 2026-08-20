@@ -12,10 +12,21 @@ import { prisma } from '../lib/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAuth, optionalAuth, requireStaff, requireAdmin } from '../middleware/auth.js';
-import { createTicketLimiter, interactionLimiter } from '../middleware/rateLimiter.js';
+import {
+  createTicketLimiter,
+  interactionLimiter,
+  commentLimiter,
+} from '../middleware/rateLimiter.js';
+
 import { validateBody, validateQuery, validateParams } from '../middleware/validate.js';
 import { notify } from '../services/pushService.js';
 import { getSettings } from '../services/settingsService.js';
+import {
+  evaluateComment,
+  recordModerationAction,
+  MODERATION_ACTION,
+} from '../services/moderationService.js';
+
 import {
   createTicketSchema,
   updateTicketSchema,
@@ -601,13 +612,30 @@ router.get(
     const comments = await prisma.ticketComment.findMany({
       where: {
         ticketId: ticket.id,
-        ...(staff ? {} : { isInternal: false }),
+        ...(staff
+          ? {}
+          : {
+              isInternal: false,
+              // Comments hidden by moderation are withheld from everyone
+              // except staff and the author. Filtered in the query rather
+              // than in JS so a hidden comment never leaves the database
+              // on a path where a later refactor might forget to drop it.
+              //
+              // The author still sees their own (with a "under review"
+              // marker from serialiseComment) — silently vanishing their
+              // words teaches nothing and generates support tickets.
+              ...(viewer ? { OR: [{ isHidden: false }, { authorId: viewer.id }] } : { isHidden: false }),
+            }),
       },
       include: { author: { select: authorSelect } },
       orderBy: { createdAt: 'asc' },
+      // Bounded. An unbounded comment fetch on a popular ticket is both a
+      // slow query and an easy way to make the API do unbounded work.
+      take: 200,
     });
 
     res.json({ comments: comments.map((c) => serialiseComment(c, viewer)) });
+
   })
 );
 
@@ -615,9 +643,13 @@ router.get(
 router.post(
   '/:id/comments',
   requireAuth,
-  interactionLimiter,
+  // Tighter than the generic interaction budget: each comment runs the
+  // moderation matcher, fans out notifications and is publicly visible,
+  // making it the most attractive spam target on the API.
+  commentLimiter,
   validateParams(ticketIdParamSchema),
   validateBody(createCommentSchema),
+
   asyncHandler(async (req, res) => {
     const ticket = await getTicketOrThrow(req.params.id, req.user, {
       include: { author: { select: { id: true } } },
@@ -631,6 +663,15 @@ router.post(
     const staff = isStaffUser(req.user);
     const isInternal = staff && req.body.isInternal === true;
 
+    // Automatic moderation. Runs before the insert so the comment is
+    // stored already carrying its verdict — there is no window in which a
+    // flagged comment exists as APPROVED and is served to other students.
+    //
+    // Internal staff notes are still scanned. Staff are not exempt from
+    // the code of conduct, and skipping them would leave an obvious hole
+    // (post the abuse as an internal note). They are simply never public.
+    const moderation = await evaluateComment(req.body.body);
+
     const comment = await prisma.$transaction(async (tx) => {
       const created = await tx.ticketComment.create({
         data: {
@@ -638,6 +679,7 @@ router.post(
           authorId: req.user.id,
           body: req.body.body,
           isInternal,
+          ...moderation.fields,
         },
         include: { author: { select: authorSelect } },
       });
@@ -653,6 +695,22 @@ router.post(
 
       return created;
     });
+
+    // Opens the audit trail for this comment. Written after the
+    // transaction so a failure to log history cannot roll back the
+    // comment the student successfully posted.
+    if (moderation.flagged) {
+      await recordModerationAction({
+        commentId: comment.id,
+        actorId: null, // the filter, not a person
+        actorRole: 'SYSTEM',
+        action: MODERATION_ACTION.AUTO_FLAGGED,
+        reason: moderation.fields.moderationReason,
+        fromStatus: null,
+        toStatus: moderation.fields.moderationStatus,
+      });
+    }
+
 
     // Internal notes are staff-only, so notifying the student about one
     // would leak both its existence and its contents.
@@ -681,6 +739,10 @@ router.post(
 router.patch(
   '/:id/comments/:commentId',
   requireAuth,
+  // Edits are re-moderated, so this needs the same budget as posting.
+  // Without a limiter, editing one comment in a loop is an unmetered way
+  // to run the matcher as often as you like.
+  commentLimiter,
   validateBody(updateCommentSchema),
   asyncHandler(async (req, res) => {
     const comment = await prisma.ticketComment.findUnique({
@@ -695,15 +757,41 @@ router.patch(
       throw new ApiError(403, 'You can only edit your own comments.');
     }
 
+    // Re-moderate on edit. This closes the obvious bypass: post something
+    // innocuous, let it through, then edit in the abuse. Without this the
+    // filter only ever sees the first version of any comment.
+    const moderation = await evaluateComment(req.body.body);
+
+    // A moderator's decision is not undone by the author editing the text.
+    // If staff already approved this comment, an edit re-queues it rather
+    // than silently inheriting that approval — otherwise "get approved,
+    // then edit" is a clean way past review.
     const updated = await prisma.ticketComment.update({
       where: { id: comment.id },
-      data: { body: req.body.body, isEdited: true },
+      data: {
+        body: req.body.body,
+        isEdited: true,
+        ...moderation.fields,
+      },
       include: { author: { select: authorSelect } },
     });
+
+    if (moderation.flagged) {
+      await recordModerationAction({
+        commentId: comment.id,
+        actorId: null,
+        actorRole: 'SYSTEM',
+        action: MODERATION_ACTION.AUTO_FLAGGED,
+        reason: `Re-flagged after edit. ${moderation.fields.moderationReason ?? ''}`.trim(),
+        fromStatus: comment.moderationStatus ?? null,
+        toStatus: moderation.fields.moderationStatus,
+      });
+    }
 
     res.json({ comment: serialiseComment(updated, req.user) });
   })
 );
+
 
 /** DELETE /api/tickets/:id/comments/:commentId — author or staff. */
 router.delete(

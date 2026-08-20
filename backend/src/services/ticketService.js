@@ -210,6 +210,7 @@ export const serialiseComment = (comment, viewer = null) => {
   if (!comment) return null;
 
   const viewerIsStaff = isStaff(viewer);
+  const isOwnComment = viewer?.id === comment.authorId;
 
   return {
     id: comment.id,
@@ -219,12 +220,35 @@ export const serialiseComment = (comment, viewer = null) => {
     isEdited: comment.isEdited,
     createdAt: comment.createdAt,
     updatedAt: comment.updatedAt,
+
+    // Moderation state is staff-only, with one deliberate exception: the
+    // author is told their own comment is under review. Without that they
+    // see a comment nobody replies to and file a support ticket about it.
+    //
+    // `moderationReason` quotes the terms that matched, so it goes to
+    // staff ONLY — showing it to the author hands them a working recipe
+    // for rewording past the filter.
+    ...(viewerIsStaff
+      ? {
+          moderationStatus: comment.moderationStatus ?? 'APPROVED',
+          moderationReason: comment.moderationReason ?? null,
+          moderationCategories: comment.moderationCategories ?? [],
+          moderationSeverity: comment.moderationSeverity ?? null,
+          isHidden: comment.isHidden ?? false,
+          moderatedAt: comment.moderatedAt ?? null,
+          flaggedAt: comment.flaggedAt ?? null,
+        }
+      : isOwnComment && comment.moderationStatus && comment.moderationStatus !== 'APPROVED'
+        ? { moderationStatus: comment.moderationStatus, isHidden: comment.isHidden ?? false }
+        : {}),
+
     permissions: {
-      canEdit: viewer?.id === comment.authorId || isAdminUser(viewer),
-      canDelete: viewer?.id === comment.authorId || viewerIsStaff,
+      canEdit: isOwnComment || isAdminUser(viewer),
+      canDelete: isOwnComment || viewerIsStaff,
     },
   };
 };
+
 
 /**
  * Timeline entry. Actors are always shown — staff actions are

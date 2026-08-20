@@ -141,21 +141,38 @@ export default function NotificationBell() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="relative rounded-lg p-2 text-white/75 hover:bg-white/10 hover:text-white"
+        // min-h/min-w 44px: the icon is 18px and p-2 gave a ~34px target,
+        // below the 44px minimum that makes a control reliably tappable
+        // with a thumb. Desktop is unaffected — the box was already
+        // larger than the glyph.
+        className="relative flex h-11 w-11 items-center justify-center rounded-lg text-white/75 hover:bg-white/10 hover:text-white"
         aria-label={unread ? `Notifications (${unread} unread)` : 'Notifications'}
+
         aria-expanded={open}
         aria-haspopup="true"
       >
         <Bell size={18} />
         {unread > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#FAF92A] px-1 text-[10px] font-bold text-[#006633]">
+          // Pulled inside the button box (right-1.5/top-1.5 rather than
+          // negative offsets) so the badge cannot overlap the adjacent
+          // hamburger control in the tight mobile header.
+          <span className="pointer-events-none absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#FAF92A] px-1 text-[10px] font-bold text-[#006633]">
             {unread > 9 ? '9+' : unread}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg dark:border-slate-800 dark:bg-slate-900">
+        // Width is viewport-relative below sm. A fixed w-80 (320px) is
+        // exactly the width of the smallest phones in use, so with the
+        // header's px-4 the panel was clipped at the screen edge and the
+        // right-hand side of every notification was unreadable.
+        <div
+          role="region"
+          aria-label="Notifications"
+          className="absolute right-0 z-50 mt-2 w-[calc(100vw-2rem)] max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg sm:w-80 dark:border-slate-800 dark:bg-slate-900"
+        >
+
           <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5 dark:border-slate-800">
             <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Notifications</h2>
             {unread > 0 && (
