@@ -25,27 +25,18 @@ import { getSettings, updateSettings } from '../services/settingsService.js';
 import { invalidateUser } from '../services/authCache.js';
 import { settingsSchema } from '../validators/settingsSchemas.js';
 import { settingsManifest, toPublicSettings } from '../config/settingsRegistry.js';
+import { recordAudit, changes } from '../services/auditService.js';
 
 const router = express.Router();
 
-/** Records who changed what. Failure here must not fail the action. */
-const audit = async (req, action, entityType, entityId, metadata) => {
-  try {
-    await prisma.auditLog.create({
-      data: {
-        actorId: req.user.id,
-        action,
-        entityType,
-        entityId: entityId ?? null,
-        metadata: metadata ?? undefined,
-        ipAddress: req.ip,
-      },
-    });
-  } catch {
-    // Losing an audit row is bad; failing the request the admin asked for
-    // because of it is worse.
-  }
-};
+/**
+ * Local alias kept so existing call sites read unchanged.
+ *
+ * The implementation moved to services/auditService.js — ticket routes
+ * need the same trail, and a helper defined inside this router couldn't be
+ * reached from there.
+ */
+const audit = recordAudit;
 
 // ------------------------------------------------------------
 // Settings & maintenance mode — SUPER_ADMIN only
@@ -81,11 +72,16 @@ router.patch(
   requireSuperAdmin,
   validateBody(settingsSchema),
   asyncHandler(async (req, res) => {
+    // Read once, up front: needed both for the domain guard below and as
+    // the "previous value" side of the audit diff. Without it the trail
+    // recorded only what was submitted, so "signups disabled" gave no way
+    // to tell whether that was a change or a no-op re-save.
+    const before = await getSettings({ fresh: true });
+
     // Turning on domain restriction with no allow-list would lock out
     // every new signup, including legitimate ones.
     if (req.body.restrictSignupDomains === true) {
-      const current = await getSettings({ fresh: true });
-      const domains = req.body.allowedDomains ?? current.allowedDomains;
+      const domains = req.body.allowedDomains ?? before.allowedDomains;
       if (!domains?.length) {
         throw new ApiError(
           400,
@@ -95,7 +91,11 @@ router.patch(
     }
 
     const settings = await updateSettings(req.body, req.user.id);
-    await audit(req, 'settings.update', 'AppSettings', '1', req.body);
+
+    // Field-by-field diff of what actually moved. These are the settings
+    // the brief calls out by name — registration and maintenance mode —
+    // and the ones most likely to need explaining after the fact.
+    await audit(req, 'settings.update', 'AppSettings', '1', changes(before, req.body));
 
     res.json({ settings });
   })
@@ -573,6 +573,71 @@ router.post(
     });
 
     res.json({ author: ticket.author });
+  })
+);
+
+// ------------------------------------------------------------
+// Audit trail — SUPER_ADMIN only
+// ------------------------------------------------------------
+
+/**
+ * GET /api/admin/audit
+ *
+ * The table was write-only until now: rows accumulated and nothing could
+ * read them without database access, which makes an audit trail useless
+ * for the person it exists to serve.
+ *
+ * SUPER_ADMIN rather than ADMIN, for two reasons. The trail records
+ * admins' own actions, so it should not be readable by everyone it
+ * describes. And reveal entries name the student behind an anonymous
+ * ticket — the narrowest possible audience for that.
+ */
+router.get(
+  '/audit',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+
+    // Narrow filters, because the useful question is usually "what
+    // happened to this ticket" or "what has this admin changed".
+    const where = {
+      ...(req.query.action ? { action: req.query.action } : {}),
+      ...(req.query.entityType ? { entityType: req.query.entityType } : {}),
+      ...(req.query.entityId ? { entityId: req.query.entityId } : {}),
+      ...(req.query.actorId ? { actorId: req.query.actorId } : {}),
+    };
+
+    const [entries, total] = await Promise.all([
+      prisma.auditLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: {
+          actor: { select: { id: true, fullName: true, email: true, role: true } },
+        },
+      }),
+      prisma.auditLog.count({ where }),
+    ]);
+
+    res.json({
+      // Mapped to the shape the brief describes — admin, action, target,
+      // timestamp, and the change itself — rather than raw columns.
+      entries: entries.map((e) => ({
+        id: e.id,
+        admin: e.actor
+          ? { id: e.actor.id, name: e.actor.fullName, role: e.actor.role }
+          : null,
+        action: e.action,
+        target: { type: e.entityType, id: e.entityId },
+        changes: e.metadata ?? null,
+        ipAddress: e.ipAddress,
+        timestamp: e.createdAt,
+      })),
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    });
   })
 );
 

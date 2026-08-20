@@ -11,6 +11,7 @@
  */
 
 import { prisma } from '../lib/prisma.js';
+import { logger } from '../lib/logger.js';
 import { SETTING_DEFAULTS } from '../config/settingsRegistry.js';
 
 const CACHE_TTL_MS = 10_000;
@@ -56,14 +57,24 @@ const warnFallback = (error) => {
 
   const drift = error?.meta?.code === '42703' || /does not exist/i.test(error?.message ?? '');
 
-  console.error(
-    `[settings] read failed — serving ${cache ? 'stale cache' : 'DEFAULTS'}: ${error?.message?.split('\n')[0]}` +
-      (drift
-        ? '\n[settings] a column is missing: the Prisma schema is ahead of the database.' +
-          '\n[settings] domain policy and maintenance mode are NOT being applied.' +
-          '\n[settings] run the pending migration in backend/prisma/sql, then restart.'
-        : '')
-  );
+  logger.error('settings.read_failed', {
+    // The operationally important bit: which values the portal is actually
+    // running on while the read is broken.
+    servingFrom: cache ? 'stale cache' : 'defaults',
+    reason: error?.message?.split('\n')[0],
+    // Schema drift is worth calling out by name because the symptom —
+    // domain policy and maintenance mode silently not applying — looks
+    // nothing like the cause.
+    schemaDrift: drift,
+    ...(drift
+      ? {
+          hint:
+            'A column is missing: the Prisma schema is ahead of the database. ' +
+            'Domain policy and maintenance mode are NOT being applied. ' +
+            'Run the pending migration in backend/prisma/sql, then restart.',
+        }
+      : {}),
+  });
 };
 
 /** Drops the cache so the next read hits the database. */

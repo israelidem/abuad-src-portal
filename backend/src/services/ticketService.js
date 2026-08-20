@@ -16,6 +16,7 @@
 
 import { prisma } from '../lib/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
+import { logger } from '../lib/logger.js';
 
 /** Hours to resolve, by urgency. Drives the SLA countdown and overdue flag. */
 const SLA_HOURS = {
@@ -256,7 +257,10 @@ export const recordEvent = async (client, { ticketId, actorId, type, from, to, m
       },
     });
   } catch (err) {
-    console.error('[ticketService] failed to record event:', err.message);
+    // The timeline is the ticket's audit trail, so a silent gap here is a
+    // gap in the record of who did what. Still non-fatal — the status
+    // change itself must not be rolled back — but it leaves a trace now.
+    logger.error('ticket.event_record_failed', { ticketId, type, actorId, err });
   }
 };
 

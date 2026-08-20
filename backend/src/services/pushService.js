@@ -13,6 +13,7 @@ import webpush from 'web-push';
 
 import { env } from '../config/env.js';
 import { prisma } from '../lib/prisma.js';
+import { logger } from '../lib/logger.js';
 
 const { publicKey, privateKey, subject } = env.vapid;
 
@@ -21,7 +22,10 @@ export const pushEnabled = Boolean(publicKey && privateKey);
 if (pushEnabled) {
   webpush.setVapidDetails(subject, publicKey, privateKey);
 } else {
-  console.warn('[push] VAPID keys not set — push notifications are disabled.');
+  // Worth a warning rather than silence: "push doesn't work" is one of the
+  // reported symptoms, and unset keys is the first thing to rule out. The
+  // keys themselves are never logged — only whether they're present.
+  logger.warn('push.disabled', { reason: 'VAPID keys not configured' });
 }
 
 /**
@@ -59,7 +63,15 @@ export async function sendToUser(userId, payload) {
         if (error.statusCode === 404 || error.statusCode === 410) {
           expired.push(sub.id);
         } else {
-          console.warn(`[push] delivery failed (${error.statusCode ?? '?'}):`, error.message);
+          // Logged against the subscription's row id, not its endpoint: the
+          // endpoint is a capability URL for that device and does not
+          // belong in a log file. The id is enough to find the row.
+          logger.warn('push.delivery_failed', {
+            subscriptionId: sub.id,
+            userId,
+            statusCode: error.statusCode ?? null,
+            reason: error.message,
+          });
         }
       }
     })
@@ -83,12 +95,29 @@ export async function sendToUser(userId, payload) {
 export async function notify(userId, { type, title, body, link, tag }) {
   if (!userId) return null;
 
-  const notification = await prisma.notification.create({
-    data: { userId, type, title, body, link },
-  });
+  let notification;
+  try {
+    notification = await prisma.notification.create({
+      data: { userId, type, title, body, link },
+    });
+  } catch (error) {
+    // This is the failure that produced "notifications don't appear": the
+    // bell reads from this table, so if the insert fails there is nothing
+    // to show and — previously — nothing in the logs either, because the
+    // throw propagated into a caller that had already swallowed it.
+    //
+    // Returning null keeps the ticket action succeeding (a reply must not
+    // fail because its notification didn't write) while leaving evidence.
+    logger.error('notification.create_failed', { userId, type, err: error });
+    return null;
+  }
 
-  // Not awaited into the caller's critical path
-  sendToUser(userId, { title, body, link, tag }).catch(() => {});
+  // Not awaited into the caller's critical path. The catch logs rather
+  // than discarding: `.catch(() => {})` here meant a total push outage
+  // looked identical to push working correctly.
+  sendToUser(userId, { title, body, link, tag }).catch((error) => {
+    logger.warn('push.send_failed', { userId, notificationId: notification.id, err: error });
+  });
 
   return notification;
 }
@@ -123,7 +152,10 @@ export async function notifyMany(userIds, { type, title, body, link, tag }) {
       await Promise.allSettled(chunk.map((id) => sendToUser(id, { title, body, link, tag })));
     }
   })().catch((error) => {
-    console.warn('[push] broadcast failed:', error.message);
+    // Records the scale alongside the failure: "broadcast failed" for 3
+    // students and for 3,000 are very different incidents, and the old
+    // message couldn't tell them apart.
+    logger.warn('push.broadcast_failed', { recipients: unique.length, type, err: error });
   });
 
   return { created: count };

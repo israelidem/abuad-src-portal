@@ -7,6 +7,7 @@
 
 import { env } from '../config/env.js';
 import { ApiError } from '../utils/ApiError.js';
+import { logger, securityLog } from '../lib/logger.js';
 
 export const notFoundHandler = (req, _res, next) => {
   next(new ApiError(404, `Route not found: ${req.method} ${req.originalUrl}`));
@@ -63,12 +64,39 @@ export const errorHandler = (err, req, res, _next) => {
     details = undefined;
   }
 
+  // `req.log` is bound to the request id by requestContext; fall back to the
+  // bare logger so an error thrown before that middleware still gets logged
+  // rather than crashing the handler on an undefined.
+  const log = req.log ?? logger;
+
   if (statusCode >= 500) {
-    console.error('[ERROR]', req.method, req.originalUrl, '\n', err);
+    // The full error object goes through the logger's sanitiser, which
+    // flattens it and strips anything credential-shaped — Prisma errors in
+    // particular can carry a connection string in their message.
+    log.error('request.failed', {
+      method: req.method,
+      path: req.originalUrl.split('?')[0],
+      status: statusCode,
+      userId: req.user?.id,
+      err,
+    });
+  } else if (statusCode === 401 || statusCode === 403) {
+    // Separated out because these are the lines that answer "is someone
+    // probing us?". A handful is normal; a burst from one user is not.
+    securityLog(statusCode === 401 ? 'unauthenticated' : 'forbidden', {
+      requestId: req.id,
+      method: req.method,
+      path: req.originalUrl.split('?')[0],
+      userId: req.user?.id,
+      reason: err.message,
+    });
   }
 
   res.status(statusCode).json({
     error: message,
+    // Gives the user something to quote. Without it, "an unexpected error
+    // occurred" is unactionable for both them and whoever reads the logs.
+    ...(req.id ? { requestId: req.id } : {}),
     ...(details ? { details } : {}),
     ...(env.isDev && statusCode >= 500 ? { stack: err.stack } : {}),
   });

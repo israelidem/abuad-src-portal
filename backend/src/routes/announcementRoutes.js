@@ -15,6 +15,7 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAuth, requireStaff, optionalAuth } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import { notifyMany } from '../services/pushService.js';
+import { logger } from '../lib/logger.js';
 
 const router = express.Router();
 
@@ -171,7 +172,16 @@ router.post(
       // A failed fan-out must not turn a saved announcement into a 500;
       // the notice exists either way and can be re-broadcast.
       await broadcastAnnouncement(announcement).catch((error) => {
-        console.warn('[announcements] broadcast failed:', error.message);
+        // Non-fatal by design — the announcement is saved and can be
+        // re-broadcast — but it needs to be findable afterwards. Carries
+        // the announcement id so "students didn't get the notice" can be
+        // traced to a specific publish.
+        (req.log ?? logger).error('announcement.broadcast_failed', {
+          announcementId: announcement.id,
+          actorId: req.user?.id,
+          phase: 'create',
+          err: error,
+        });
       });
     }
 
@@ -217,7 +227,12 @@ router.patch(
     // announcement must not notify everyone a second time.
     if (isPublishingNow) {
       await broadcastAnnouncement(announcement).catch((error) => {
-        console.warn('[announcements] broadcast failed:', error.message);
+        (req.log ?? logger).error('announcement.broadcast_failed', {
+          announcementId: announcement.id,
+          actorId: req.user?.id,
+          phase: 'publish',
+          err: error,
+        });
       });
     }
 

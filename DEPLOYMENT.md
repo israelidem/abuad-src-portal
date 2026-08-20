@@ -165,8 +165,21 @@ Recorded for completeness. Not executed.
 
 Independent of hosting:
 
-- `backend/prisma/sql/06_security_hardening.sql` and `08_settings_registry.sql`
-  must be applied to Supabase (see `PROD.md`). RLS is not in the Prisma
-  schema, so `prisma migrate` will not apply it.
+- `backend/prisma/sql/06`–`09` must be applied to Supabase (see `PROD.md`).
+  RLS, triggers and storage policies are not in the Prisma schema, so
+  `prisma migrate` will never apply them. Apply with
+  `node scripts/apply-sql.mjs prisma/sql/<file>`; all are idempotent.
+- **Then run `npm run verify:rls`** — it asks the database what is actually
+  in force and should report **21 passed, 0 failed**.
+
+  This is not ceremony. During the final review it found that
+  `09_storage_anonymous.sql` had never been applied, which meant anonymous
+  submissions *with an attachment* were being rejected by Storage while
+  identified ones worked. Nothing in the source tree could have shown that:
+  the SQL file was present and every test passed. **A migration that exists
+  in the repo is not a migration that is applied to the database**, and
+  that gap is invisible from the application side — so check it explicitly
+  in every environment, including this one after any Supabase project
+  restore or branch.
 - VAPID keys must be set for push to work at all
   (`npx web-push generate-vapid-keys`).
