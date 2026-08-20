@@ -27,7 +27,11 @@ import { adminApi } from '../lib/api.js';
 import { useToast } from '../context/ToastContext.jsx';
 import { useTheme } from '../context/ThemeContext.jsx';
 import { STATUSES, CATEGORIES } from '../lib/constants.js';
-import { Spinner } from '../components/Spinner.jsx';
+import {
+  Skeleton,
+  StatSkeleton,
+  ChartCardSkeleton,
+} from '../components/Spinner.jsx';
 
 const WINDOWS = [7, 30, 90, 365];
 
@@ -140,9 +144,46 @@ export default function Analytics() {
   }, [load]);
 
   if (loading && !data) {
+    // Mirrors the real layout below — 4 stat tiles, the wide trend panel,
+    // then two 2-column chart rows. A centred spinner meant the entire
+    // page arrived at once and shoved itself into place; this is the one
+    // route with enough structure for that reflow to be jarring.
+    //
+    // aria-busy + a single role="status" on the wrapper: the individual
+    // Skeletons are aria-hidden, so assistive tech hears "loading
+    // analytics" once rather than a dozen empty nodes.
     return (
-      <div className="flex justify-center py-16">
-        <Spinner size="lg" />
+      <div
+        className="mx-auto max-w-6xl px-4 py-8"
+        role="status"
+        aria-busy="true"
+        aria-label="Loading analytics"
+      >
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <Skeleton className="h-8 w-32" />
+          <Skeleton className="h-8 w-44" />
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }, (_, i) => (
+            <StatSkeleton key={i} />
+          ))}
+        </div>
+
+        {/* The trend chart is taller than the rest, hence the override. */}
+        <div className="mt-6">
+          <ChartCardSkeleton height="h-64" />
+        </div>
+
+        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+          <ChartCardSkeleton />
+          <ChartCardSkeleton />
+        </div>
+
+        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+          <ChartCardSkeleton />
+          <ChartCardSkeleton />
+        </div>
       </div>
     );
   }

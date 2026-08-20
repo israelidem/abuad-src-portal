@@ -138,7 +138,7 @@ export default function TicketCard({ ticket, onVoteChange }) {
             className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-60 ${
               voted
                 ? 'border-[#006633] bg-[#006633]/10 text-[#006633]'
-                : 'border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-700'
+                : 'border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-700 dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-600 dark:hover:text-slate-200'
             }`}
           >
             <ThumbsUp size={13} />

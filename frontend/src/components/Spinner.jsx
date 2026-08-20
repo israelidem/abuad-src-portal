@@ -78,3 +78,32 @@ export function TicketCardSkeleton() {
     </div>
   );
 }
+
+/** Mirrors the `Stat` card on Analytics: label, big number, optional hint. */
+export function StatSkeleton() {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+      <Skeleton className="h-3 w-20" />
+      <Skeleton className="mt-2 h-7 w-16" />
+      <Skeleton className="mt-1.5 h-3 w-24" />
+    </div>
+  );
+}
+
+/**
+ * Placeholder for a chart panel.
+ *
+ * `height` should match the ResponsiveContainer it stands in for —
+ * that's the whole point of it, so the six chart cards don't collapse
+ * and then shove the page down when the data lands.
+ */
+export function ChartCardSkeleton({ height = 'h-56' }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+      <Skeleton className="h-5 w-40" />
+      <Skeleton className={`mt-4 w-full ${height}`} />
+    </div>
+  );
+}
+
+

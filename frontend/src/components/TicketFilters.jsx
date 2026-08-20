@@ -42,8 +42,11 @@ export default function TicketFilters({ params, onChange, onReset }) {
 
   const active = SELECTS.some(({ name }) => params[name]) || params.q;
 
+  // `bg-white` needs a dark partner or every filter dropdown stays a white
+  // box on a dark page. Same for the text colour — a native <select>
+  // inherits neither from the page.
   const selectClass =
-    'rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-[#006633] focus:outline-none focus:ring-1 focus:ring-[#006633]';
+    'rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-[#006633] focus:outline-none focus:ring-1 focus:ring-[#006633] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100';
 
   return (
     <div className="mb-6 space-y-3">
@@ -59,7 +62,7 @@ export default function TicketFilters({ params, onChange, onReset }) {
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search issues by description, location or ticket number…"
           aria-label="Search issues"
-          className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm focus:border-[#006633] focus:outline-none focus:ring-1 focus:ring-[#006633] dark:border-slate-700"
+          className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm focus:border-[#006633] focus:outline-none focus:ring-1 focus:ring-[#006633] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder-slate-500"
         />
       </div>
 
@@ -98,7 +101,7 @@ export default function TicketFilters({ params, onChange, onReset }) {
           <button
             type="button"
             onClick={onReset}
-            className="flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400"
+            className="flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
           >
             <X size={14} />
             Clear

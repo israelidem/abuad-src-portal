@@ -39,10 +39,19 @@ export function ToastProvider({ children }) {
     }
   }, []);
 
+  /**
+   * `action` is an optional `{ label, onClick }`, rendered as a button
+   * inside the toast. Added for the service-worker update prompt, which
+   * needs to offer "Reload" rather than just stating that an update
+   * exists and leaving the user to guess.
+   *
+   * Pass `duration: 0` alongside it — a toast with an action that
+   * disappears before the user can click it is worse than none.
+   */
   const show = useCallback(
-    (message, variant = 'info', duration = 5000) => {
+    (message, variant = 'info', duration = 5000, action = null) => {
       const id = crypto.randomUUID();
-      setToasts((current) => [...current, { id, message, variant }]);
+      setToasts((current) => [...current, { id, message, variant, action }]);
 
       // Errors stay until dismissed — they usually need an action
       if (duration > 0 && variant !== 'error') {
@@ -63,7 +72,7 @@ export function ToastProvider({ children }) {
       dismiss,
       success: (message, duration) => show(message, 'success', duration),
       error: (message, duration) => show(message, 'error', duration),
-      info: (message, duration) => show(message, 'info', duration),
+      info: (message, duration, action) => show(message, 'info', duration, action),
     }),
     [show, dismiss]
   );
@@ -78,7 +87,7 @@ export function ToastProvider({ children }) {
         aria-label="Notifications"
         className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-full max-w-sm flex-col gap-2 px-4 sm:px-0"
       >
-        {toasts.map(({ id, message, variant }) => {
+        {toasts.map(({ id, message, variant, action }) => {
           const { icon: Icon, className } = VARIANTS[variant] ?? VARIANTS.info;
           return (
             <div
@@ -86,7 +95,21 @@ export function ToastProvider({ children }) {
               className={`pointer-events-auto flex items-start gap-3 rounded-lg border p-4 shadow-lg ${className}`}
             >
               <Icon size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
-              <p className="flex-1 text-sm">{message}</p>
+              <div className="flex-1">
+                <p className="text-sm">{message}</p>
+                {action && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      dismiss(id);
+                      action.onClick();
+                    }}
+                    className="mt-2 text-sm font-semibold underline underline-offset-2 hover:no-underline"
+                  >
+                    {action.label}
+                  </button>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => dismiss(id)}

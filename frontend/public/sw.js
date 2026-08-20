@@ -18,10 +18,29 @@
  *                 cold offline launch shows the app instead of the
  *                 browser's dinosaur.
  *
- * Bump CACHE_VERSION to evict everything on the next activation.
+ * Update choreography — the reason this worker does NOT call skipWaiting()
+ * during install:
+ *
+ * A page that is already open holds the *old* chunk filenames in memory.
+ * If a new worker took over mid-session and evicted the old caches, the
+ * next lazy-route navigation would request an asset hash that no longer
+ * exists on the origin, 404, and reject the dynamic import — a blank
+ * region for a user who did nothing. So a new worker installs, then
+ * waits. It activates only when the page sends SKIP_WAITING, which
+ * happens when the user accepts the "new version" prompt and is
+ * immediately followed by a reload. `clients.claim()` in activate is what
+ * makes that reload pick up the new worker.
+ *
+ * CACHE_VERSION is stamped at build time by scripts/stamp-sw.mjs. It has
+ * to be dynamic for two reasons: a hand-edited 'v1' meant the shell cache
+ * was never evicted, so an offline cold start could serve an index.html
+ * from an arbitrarily old deploy; and — less obvious but more important —
+ * the browser detects a new worker by byte-diffing this file. With a
+ * static file, a deploy that changed only app code produced no new
+ * worker at all, so the update prompt below could never fire.
  */
 
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = '__BUILD_VERSION__';
 const SHELL_CACHE = `src-shell-${CACHE_VERSION}`;
 const ASSET_CACHE = `src-assets-${CACHE_VERSION}`;
 
@@ -34,9 +53,15 @@ self.addEventListener('install', (event) => {
       const cache = await caches.open(SHELL_CACHE);
       // Individually, so one 404 doesn't fail the whole install
       await Promise.allSettled(SHELL_URLS.map((url) => cache.add(new Request(url))));
-      await self.skipWaiting();
+      // No skipWaiting() here — see the header comment. The new worker
+      // sits in `waiting` until the page asks it to take over.
     })()
   );
+});
+
+// Sent by lib/registerSW.js when the user accepts the update prompt.
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {

@@ -181,7 +181,7 @@ export default function NotificationBell() {
                   <Link
                     to={n.link ?? '/dashboard'}
                     onClick={() => openItem(n)}
-                    className={`block px-4 py-3 hover:bg-slate-50 ${
+                    className={`block px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800 ${
                       n.isRead ? '' : 'bg-[#006633]/5'
                     }`}
                   >

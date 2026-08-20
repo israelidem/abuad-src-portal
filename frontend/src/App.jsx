@@ -17,6 +17,7 @@ import { ToastProvider } from './context/ToastContext.jsx';
 import { ThemeProvider } from './context/ThemeContext.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import Layout from './components/Layout.jsx';
+import UpdatePrompt from './components/UpdatePrompt.jsx';
 import { FullPageSpinner } from './components/Spinner.jsx';
 import {
   RequireAuth,
@@ -55,6 +56,10 @@ export default function App() {
         <ThemeProvider>
           <AuthProvider>
             <ToastProvider>
+            {/* Inside ToastProvider (it needs useToast) but outside
+                Suspense, so a waiting update can still be announced while
+                a lazy route is loading. */}
+            <UpdatePrompt />
             <Suspense fallback={<FullPageSpinner />}>
               <Routes>
                 <Route element={<Layout />}>

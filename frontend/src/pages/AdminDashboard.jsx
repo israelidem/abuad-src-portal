@@ -56,7 +56,11 @@ export default function AdminDashboard() {
 
       <dl className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
         {[
-          ['Total', stats?.total ?? 0, 'text-slate-900'],
+          // Needs an explicit dark variant: the card behind it is
+          // dark:bg-slate-900, so a bare `text-slate-900` renders the
+          // headline number invisible. The coloured entries below survive
+          // on both backgrounds, which is how this went unnoticed.
+          ['Total', stats?.total ?? 0, 'text-slate-900 dark:text-white'],
           ['Overdue', stats?.overdue ?? 0, 'text-red-600'],
           ['Pending', stats?.byStatus?.PENDING ?? 0, 'text-amber-600'],
           ['Resolved', stats?.byStatus?.RESOLVED ?? 0, 'text-green-600'],

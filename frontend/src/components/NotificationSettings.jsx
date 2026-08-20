@@ -22,7 +22,9 @@ export default function NotificationSettings() {
       <div className="flex items-start gap-3">
         <span
           className={`mt-0.5 rounded-lg p-2 ${
-            subscribed ? 'bg-[#006633]/10 text-[#006633]' : 'bg-slate-100 text-slate-500'
+            subscribed
+              ? 'bg-[#006633]/10 text-[#006633]'
+              : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
           }`}
           aria-hidden="true"
         >
@@ -59,7 +61,7 @@ export default function NotificationSettings() {
               disabled={busy}
               className={`mt-4 flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-60 ${
                 subscribed
-                  ? 'border border-slate-300 text-slate-700 hover:bg-slate-50'
+                  ? 'border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800'
                   : 'bg-[#006633] text-white hover:brightness-110'
               }`}
             >

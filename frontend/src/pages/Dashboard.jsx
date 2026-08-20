@@ -30,7 +30,9 @@ export default function Dashboard() {
   const firstName = profile?.fullName?.split(' ')[0] ?? 'there';
 
   const tiles = [
-    ['Reported', stats?.total ?? 0, 'text-slate-900'],
+    // See AdminDashboard: without the dark variant this is slate-900 on a
+    // slate-900 card, i.e. the student's own report count disappears.
+    ['Reported', stats?.total ?? 0, 'text-slate-900 dark:text-white'],
     ['Pending', stats?.byStatus?.PENDING ?? 0, 'text-amber-600'],
     ['In progress', stats?.byStatus?.IN_PROGRESS ?? 0, 'text-blue-600'],
     ['Resolved', stats?.byStatus?.RESOLVED ?? 0, 'text-green-600'],

@@ -215,7 +215,7 @@ export default function TicketDetail() {
             className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium disabled:opacity-60 ${
               ticket.hasVoted
                 ? 'border-[#006633] bg-[#006633]/10 text-[#006633]'
-                : 'border-slate-300 text-slate-600 hover:bg-slate-50'
+                : 'border-slate-300 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800'
             }`}
           >
             <ThumbsUp size={15} />
@@ -303,7 +303,11 @@ export default function TicketDetail() {
           {ticket.comments?.map((c) => (
             <li
               key={c.id}
-              className={`rounded-lg p-4 ${c.isInternal ? 'border border-amber-200 bg-amber-50' : 'bg-slate-50'}`}
+              className={`rounded-lg p-4 ${
+                c.isInternal
+                  ? 'border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/30'
+                  : 'bg-slate-50 dark:bg-slate-800/60'
+              }`}
             >
               <div className="mb-1 flex flex-wrap items-center gap-2 text-xs">
                 <span className="font-medium text-slate-800 dark:text-slate-100">
@@ -340,7 +344,7 @@ export default function TicketDetail() {
               onChange={(e) => setComment(e.target.value)}
               rows={3}
               placeholder="Add an update or ask a question…"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-[#006633] focus:outline-none focus:ring-1 focus:ring-[#006633] dark:border-slate-700"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-[#006633] focus:outline-none focus:ring-1 focus:ring-[#006633] dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder-slate-500"
             />
 
             <div className="flex items-center justify-between">

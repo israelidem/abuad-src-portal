@@ -108,7 +108,7 @@ export default function StaffControls({ ticket, onUpdated }) {
   };
 
   const selectClass =
-    'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-[#006633] focus:outline-none focus:ring-1 focus:ring-[#006633]';
+    'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-[#006633] focus:outline-none focus:ring-1 focus:ring-[#006633] dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder-slate-500';
 
   return (
     <section className="mt-6 rounded-xl border-2 border-[#006633]/20 bg-[#006633]/[0.03] p-6">

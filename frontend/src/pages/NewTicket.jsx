@@ -164,8 +164,8 @@ export default function NewTicket() {
     `w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-1 ${
       fieldErrors[field]
         ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
-        : 'border-slate-300 focus:border-[#006633] focus:ring-[#006633]'
-    }`;
+        : 'border-slate-300 focus:border-[#006633] focus:ring-[#006633] dark:border-slate-700'
+    } dark:bg-slate-950 dark:text-slate-100 dark:placeholder-slate-500`;
 
   const remaining = MIN_DESCRIPTION - form.description.trim().length;
 
@@ -351,7 +351,7 @@ export default function NewTicket() {
                 className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
                   selected
                     ? 'border-[#006633] bg-[#006633]/[0.06]'
-                    : 'border-slate-200 bg-white hover:border-slate-300'
+                    : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:hover:border-slate-600'
                 }`}
               >
                 <input
