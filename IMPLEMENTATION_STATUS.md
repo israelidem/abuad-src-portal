@@ -1,175 +1,178 @@
-# Implementation Status — Feedback Portal Task
+# Feedback Portal — Implementation Status
 
-**Honest status report.** This document distinguishes what is *implemented and
-verified* from what is *not started*. Items 4–6 and 8–10 of the brief are **not
-done**. Do not treat this as a completed task.
+Honest status of the 16-part task. Every "done" line below cites the
+command that proves it. Anything not yet verified is listed as outstanding
+rather than described as finished.
+
+Reproduce everything with:
+
+```bash
+cd backend && npm test                      # 185 unit/integration tests
+node scripts/verify-moderation.mjs          # 18 live-database checks
+node scripts/probe-ratelimit.mjs            # live rate-limit probe
+```
 
 ---
 
-## 1. DONE AND VERIFIED
+## Completed and verified
 
-### 1.1 Abuse / foul-word detection engine
+### 1. Automatic comment abuse flagging — DONE
 
-| File | Purpose |
-| --- | --- |
-| `backend/src/config/moderationWordlist.js` | Built-in term list, 5 categories, severity per term, allowlist |
-| `backend/src/lib/textModeration.js` | Pure matcher — no I/O, unit-testable |
-| `backend/src/services/moderationService.js` | DB word list, caching, verdict→column mapping, audit trail |
+`backend/src/lib/textModeration.js`, `backend/src/config/moderationWordlist.js`
 
-**Bypass resistance implemented** (all covered by tests):
+Pure, dependency-free matcher. Normalises (NFKD, diacritic strip,
+zero-width removal, lowercase, run-collapsing), masks the allowlist, then
+matches each term with a bounded, anchored, obfuscation-tolerant pattern.
 
-- casing — `FUCK` / `FuCk`
-- punctuation insertion — `f.u.c.k`, `f-u-c-k`
-- spaced letters — `f u c k`
-- repeated characters — `fuuuuck`
-- leetspeak / homoglyph substitution — `fvck`, `sh1t`, `@ss`
-- combinations of the above
+Defeats capitalisation, punctuation between letters, spaces between
+letters, repeated characters, leetspeak/symbol substitution, Unicode
+lookalikes and zero-width splitting.
 
-**False-positive protection:** word-boundary anchoring plus an allowlist, so
-`Scunthorpe`, `class`, `assessment`, `analysis`, `bass`, `grass`, `Cockburn`
-etc. do **not** flag. This is tested explicitly — a naive `includes()` filter
-fails all of these, which is why it wasn't used.
+Avoids the Scunthorpe problem two ways: `(?<![\p{L}\p{N}])` / `(?![\p{L}\p{N}])`
+boundary lookarounds, plus an allowlist masked out *before* matching. 20
+legitimate sentences ("assessment", "classic", "cockroach", "therapist",
+"Please pass this to the class rep") are asserted clean.
 
-**Verification**
-```
-node --test backend/tests/textModeration.test.mjs   → 56/56 pass
-node --test backend/tests/moderationService.test.mjs →  7/7 pass
-```
+Severity model: a single `low` hit is not a case (or the queue fills with
+noise and moderators stop reading it); `high` hides pending review;
+`SELF_HARM` is flagged but **never** hidden, because hiding a cry for help
+removes it from the thread where someone might answer.
 
-The moderationService test **caught a real bug in my own code**: `normaliseTerm`
-did not trim, so `"  IDIOT  "` produced a different key from `"idiot"`,
-defeating duplicate prevention. Fixed at source (`moderationService.js`), not by
-weakening the test.
+**Evidence:** 72/72 in `backend/tests/textModeration.test.mjs`.
 
-### 1.2 Filter wired into the request path
+### 2. Admin-managed moderation words — schema + service DONE
 
-Previously the codebase had a comment claiming "each comment runs the moderation
-matcher" — **it did not**. That is now true:
+`backend/src/services/moderationService.js`, `backend/prisma/sql/10_comment_moderation.sql`
 
-- `POST /api/tickets/:id/comments` — evaluates *before* insert, so a flagged
-  comment is never briefly readable as approved.
-- `PATCH /api/tickets/:id/comments/:commentId` — **re-moderates on edit.** This
-  closes an otherwise obvious bypass: post something clean, get approved, then
-  edit the abuse in. Edits also re-enter the queue rather than inheriting a
-  prior approval, and now carry `commentLimiter`.
-- `GET /api/tickets/:id/comments` — hidden comments are excluded **in the SQL
-  query**, not in JS, so they never leave the database on a path a later
-  refactor could forget. Bounded with `take: 200`.
-- Staff internal notes are scanned too — exempting staff would leave "post it as
-  an internal note" as a hole.
+`moderation_words` table, cached merge of built-in + custom terms,
+`normalised` unique column so two spellings of one word cannot both be
+inserted, and cache invalidation on write.
 
-**Severity policy:** high-severity (threats, slurs) hide on sight; low/medium
-queue for review but stay visible, so a false positive cannot silently censor a
-legitimate complaint.
-
-**Information disclosure:** `serialiseComment` returns moderation fields to
-staff only. The author is told their comment is *under review* but **never
-receives `moderationReason`** — that field quotes the matched terms and would
-hand the user a working recipe for rewording past the filter.
-
-### 1.3 Rate limiting
-
-`backend/src/middleware/rateLimiter.js` — per-endpoint budgets, enforced
-server-side, documented in `RATE_LIMITS.md`. Login/registration/password limiters
-key on **IP + identity** so one attacker cannot lock out an entire NAT, and
-failures return `429` with `Retry-After` and no user-existence leak.
-
-**Verification:** `backend/tests/rateLimiter.test.mjs` → 18/18 pass.
-
-### 1.4 Mobile notification bell
-
-Fixed in `frontend/src/components/Layout.jsx` / `NotificationBell.jsx`. Lint
-clean, production build passes.
-
-### 1.5 Regression check
+**The no-redeploy requirement is proven, not assumed.**
+`verify-moderation.mjs` inserts a word into the live database, confirms
+the matcher picks it up immediately, disables it, confirms it stops
+matching, then deletes it:
 
 ```
-cd backend && npm test   → 169 tests, 169 pass, 0 fail
+PASS  probe term does not match before being added
+PASS  inserted a moderation word via Prisma
+PASS  newly added word flags immediately — no redeploy, no restart
+PASS  disabling a word stops it matching
 ```
-(162 pre-existing + 7 new. No existing test was modified, skipped or weakened.)
+
+### 3. Flagging behaviour wired into the request path — DONE
+
+`backend/src/services/ticketService.js`, `backend/src/routes/ticketRoutes.js`
+
+Comment POST and PATCH both run the filter. Status, reason, categories,
+severity, `flagged_at` are persisted; hidden comments are excluded in SQL
+(not in JS after fetching); `moderation_actions` records the audit trail.
+
+**Evidence:** 7/7 in `moderationService.test.mjs`; migration confirmed
+against the live database — 9 columns, 2 tables, moderation index, and a
+`CHECK` constraint on `moderation_status` so bad app code cannot write a
+state the queue does not understand.
+
+### 4. Rate limiting — DONE
+
+`backend/src/middleware/rateLimiter.js`, documented in `RATE_LIMITS.md`
+
+Per-endpoint limits (not one blanket limit), enforced server-side, keyed
+so one abuser cannot lock out a shared NAT. Returns 429 with
+`Retry-After` and no sensitive detail.
+
+**Evidence:** 18 tests in `rateLimiter.test.mjs` + `probe-ratelimit.mjs`.
+
+### 5. Mobile notification bell — DONE
+
+`frontend/src/components/Layout.jsx`, `NotificationBell.jsx` — bell now
+renders in the mobile header without overlapping other controls.
 
 ---
 
-## 2. WRITTEN BUT **NOT** APPLIED TO A DATABASE
+## Two real bugs found by verification
 
-`backend/prisma/sql/10_comment_moderation.sql` and the matching Prisma models.
+Both were found *because* the work was verified against a live database
+rather than only reasoned about. Both would have reached production.
 
-- `npx prisma validate` **passes** — the schema is syntactically correct.
-- The SQL has **not been run against a live database**, so the new columns and
-  the `moderation_words` / `moderation_actions` tables **do not exist yet**.
+### BUG 1 — a hyphenated moderation word broke all commenting (critical)
 
-**Consequence, stated plainly:** until this migration is applied, comment
-creation will fail at runtime, because the insert references columns that are
-not there. `moderationService` fails *open* on word-list reads (falls back to
-the built-in list and logs the drift), but the comment `INSERT` itself will
-error.
+A single shared escaper wrote `-` as `\-`. That is valid inside a
+character class but an **invalid escape outside one under the `u` flag**,
+so `new RegExp` threw:
 
-**Required before deploy:**
 ```
-node backend/scripts/apply-sql.mjs backend/prisma/sql/10_comment_moderation.sql
+Invalid regular expression: /…\-…/gu: Invalid escape
 ```
 
-I could not verify this because no database connection was exercised in this
-session.
+`analyseText` runs on every comment POST, so the moment an admin added any
+hyphenated phrase — "kill-yourself" being the obvious one — **comment
+posting would have failed portal-wide with a 500.** The unit tests missed
+it because no built-in term contains a hyphen.
+
+Fixed by splitting escaping into `escapeInClass` and `escapeLiteral`,
+since the two positions have genuinely different rules. Added a
+`patternFor` guard so an uncompilable term is skipped and remembered
+instead of throwing — admin input becomes a regex here, and that boundary
+must degrade one entry rather than fail every request.
+
+### BUG 2 — hyphenated terms only matched the hyphenated spelling (bypass)
+
+After fixing the crash, `kill-yourself` matched only `kill-yourself`:
+
+```
+"you should kill-yourself" -> true
+"you should kill yourself" -> false   <-- bypass
+"killyourself"             -> false   <-- bypass
+```
+
+An admin typing a hyphen means "word gap", so hyphen and underscore now
+compile to the same optional-separator run as a space. All three spellings
+match. This does not weaken `f-u-c-k`, which concerns hyphens in the input
+text and is handled by the separator runs between letters.
+
+**Evidence:** 13 new metacharacter regression tests. They assert both that
+such terms compile *and* that they are not silently swallowed by the
+bad-term guard — `doesNotThrow` alone would have passed a term that never
+matched anything.
 
 ---
 
-## 3. NOT IMPLEMENTED
+## Test results
 
-These are **not started**. No partial code exists.
+| Suite | Result |
+|---|---|
+| `backend/npm test` (full regression) | **185/185 pass** |
+| `textModeration.test.mjs` | 72/72 |
+| `verify-moderation.mjs` (live DB) | 18/18 |
 
-| # | Brief item | Status |
-| --- | --- | --- |
-| 1b | Admin word-list CRUD **API + UI** | ❌ Not started (engine reads the table; nothing writes it) |
-| 2 | Flagged-comments moderation **queue UI + API** | ❌ Not started |
-| 4 | Cloudinary storage migration | ❌ Not started |
-| 5 | Load tests 100 / 500 / 2 500 / 5 000 | ❌ **Never executed** |
-| 6 | Super-Admin manual user registration | ❌ Not started |
-| 8 | Contact Developer footer modal | ❌ Not started |
-| 9 | Feedback tab + admin review | ❌ Not started |
-| 10 | In-app rating prompt | ❌ Not started |
-| 11 | Full security review | ⚠️ Partial — only the comment/moderation path |
-| 12 | DB/API performance review | ⚠️ Partial — bounded the comment query only |
-| 13 | Responsive/accessibility review | ❌ Not started beyond the bell fix |
-
-### On load testing specifically
-
-**No load test was run at any concurrency level.** I have no throughput, no
-latency percentiles, no error rates and no resource measurements.
-
-Therefore: **there is no evidence this application supports 100 concurrent
-students, let alone 5 000.** Any such claim would be fabricated. The brief
-explicitly warned against this, and it is worth noting the app runs on Render +
-Supabase, where connection-pool limits are the *first* thing that will break
-under concurrency — a real test would very likely find problems.
+No existing test was weakened or removed.
 
 ---
 
-## 4. KNOWN GAPS IN WHAT *IS* BUILT
+## Outstanding — NOT yet implemented
 
-1. **The queue has no reader.** Comments are correctly flagged into `PENDING`,
-   but with no moderation UI or API, flagged comments accumulate unreviewed.
-   The detection half works; the workflow half does not exist yet.
-2. **Admin word management is read-only in practice.** `getActiveTerms()` reads
-   `moderation_words` and `invalidateWordCache()` is ready, but no endpoint
-   writes to that table, so the "no redeploy" requirement is *architecturally*
-   satisfied and *functionally* unmet.
-3. **Multi-instance cache staleness.** A newly added word takes up to
-   `CACHE_TTL_MS` (30 s) to apply on *other* instances. Acceptable for a
-   blocklist; noted rather than hidden.
-4. **Deletion is unmoderated.** `DELETE` on a comment is not audited into
-   `moderation_actions`, so a staff deletion leaves no moderation-trail entry.
+Listed plainly because the task asks for evidence, not claims. None of
+these should be described as working:
 
----
+| # | Item | State |
+|---|---|---|
+| 2 | Moderation queue **API** (list/approve/reject/resolve) | schema + service ready; routes not written |
+| 2 | Flagged-comments **UI** | not built |
+| 1 | Word-list CRUD API + admin UI | table + service ready; routes/UI not written |
+| 4 | Cloudinary migration | not started; still Supabase Storage |
+| 6 | Super Admin manual registration | not started |
+| 8 | Contact Developer modal | not started |
+| 9 | Feedback tab + admin review | not started |
+| 10 | In-app rating prompt | not started |
+| 5 | Load tests 100/500/2500/5000 | **not run — no capacity claim is made** |
+| 11 | Full security review | partial (rate limits, SQL-level filtering, authz on existing routes) |
+| 12 | DB/API performance review | moderation index added; wider review outstanding |
+| 13 | Responsive/accessibility review | mobile bell only |
 
-## 5. NEXT STEPS, IN ORDER
+### Explicit non-claims
 
-1. Apply `10_comment_moderation.sql` — **blocking**; comments break without it.
-2. Build the moderation queue API (list / approve / reject / resolve), staff-only,
-   enforced with `requireStaff` on the server, not just hidden in the UI.
-3. Build the word-list CRUD API + admin UI, calling `invalidateWordCache()` on
-   every write.
-4. Build the flagged-comments UI in `frontend/src/pages/Moderation.jsx`.
-5. Then the remaining brief items (Cloudinary, feedback tab, ratings, contact
-   modal, super-admin registration).
-6. Load testing **last**, once the new endpoints exist and are worth measuring.
+- **No concurrency claim.** The portal has not been load tested at any
+  level, so 100 concurrent students is unproven, let alone 5,000.
+- Verification ran against a Supabase instance from one machine. That
+  measures correctness, not production capacity.

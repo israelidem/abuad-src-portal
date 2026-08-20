@@ -27,6 +27,8 @@ import {
   normaliseForMatching,
   collapseRuns,
   LOW_SEVERITY_THRESHOLD,
+  _badTermCount,
+  _badTerms,
 } from '../src/lib/textModeration.js';
 import { BUILTIN_WORDLIST, ALLOWLIST } from '../src/config/moderationWordlist.js';
 
@@ -323,5 +325,80 @@ describe('robustness', () => {
       allowlist: ALLOWLIST,
     });
     assert.equal(result.flagged, false);
+  });
+});
+
+// ------------------------------------------------------------
+// Regression: terms containing regex metacharacters
+//
+// A single shared escaper emitted `\-` outside a character class. That is
+// an invalid escape under the `u` flag, so `new RegExp` threw — and since
+// analyseText runs on every comment POST, one hyphenated admin word broke
+// comment posting for the whole portal.
+//
+// The unit tests here never caught it because no built-in term contains a
+// hyphen; scripts/verify-moderation.mjs did, by inserting a real word into
+// the real table. These tests exist so it can never come back silently.
+// ------------------------------------------------------------
+
+describe('terms containing regex metacharacters', () => {
+  const nasty = [
+    'kill-yourself',   // the exact shape that broke commenting
+    'go-away-now',     // more than one hyphen
+    'what[ever]',      // character-class brackets
+    'a+b',             // plus
+    'c*d',             // star
+    'e(f)',            // capture group
+    'g|h',             // alternation
+    'back\\slash',     // backslash
+    '^caret$',         // anchors
+    'a{2}',            // quantifier braces
+    'slash/term',      // forward slash
+    'question?mark',   // optional quantifier
+    'dot.term',        // any-char
+  ];
+
+  for (const term of nasty) {
+    test(`"${term}" compiles instead of throwing`, () => {
+      assert.doesNotThrow(() =>
+        analyseText('a harmless comment about a broken projector', {
+          terms: [{ term, category: 'HARASSMENT', severity: 'high' }],
+        })
+      );
+    });
+  }
+
+  test('none of them are silently discarded as uncompilable', () => {
+    // doesNotThrow alone would also pass if the term were quietly skipped
+    // by the bad-term guard, which would mean the word never moderates
+    // anything. Assert the guard did not swallow any of them.
+    for (const term of nasty) {
+      analyseText('x', { terms: [{ term, severity: 'high' }] });
+    }
+    assert.equal(
+      _badTermCount(),
+      0,
+      `uncompilable terms: ${_badTerms().join(', ')}`
+    );
+  });
+
+  test('a hyphenated term actually matches, not just compiles', () => {
+    const terms = [{ term: 'kill-yourself', category: 'THREAT', severity: 'high' }];
+
+    assert.equal(analyseText('you should kill-yourself', { terms }).flagged, true);
+    // Separator tolerance should catch the spaced and joined variants too.
+    assert.equal(analyseText('you should kill yourself', { terms }).flagged, true);
+    assert.equal(analyseText('killyourself', { terms }).flagged, true);
+    assert.equal(analyseText('the projector is broken', { terms }).flagged, false);
+  });
+
+  test('a term that is only punctuation cannot flag every comment', () => {
+    // An admin typing "..." must not turn into a pattern that matches all
+    // text — that would flag the entire portal at once.
+    const terms = [{ term: '...', category: 'PROFANITY', severity: 'high' }];
+    assert.equal(
+      analyseText('The lecture hall projector is broken.', { terms }).flagged,
+      false
+    );
   });
 });

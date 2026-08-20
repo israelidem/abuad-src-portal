@@ -143,8 +143,27 @@ export const normaliseForMatching = (input) => {
  */
 export const collapseRuns = (text) => text.replace(/(.)\1{2,}/gu, '$1$1');
 
-/** Escapes a string for literal use inside a character class or pattern. */
-const escapeForClass = (s) => s.replace(/[\\\]^-]/g, '\\$&');
+/**
+ * Escaping needs TWO functions, not one, because the rules differ either
+ * side of a character class — and conflating them was a real bug.
+ *
+ * A single shared escaper wrote `-` as `\-`. That is valid inside
+ * `[...]`, but outside a class `\-` is an *invalid escape* under the `u`
+ * flag, so the RegExp constructor threw. The effect was severe and
+ * non-obvious: an admin adding any hyphenated phrase (e.g. "kill-yourself")
+ * made analyseText throw, which took down comment posting entirely.
+ * Caught by scripts/verify-moderation.mjs.
+ */
+
+/** Inside `[...]`: only these carry special meaning. */
+const escapeInClass = (s) => s.replace(/[\\\]^-]/g, '\\$&');
+
+/**
+ * Outside a class: escape only the syntax characters that `u` mode
+ * permits escaping. Escaping anything else is a SyntaxError rather than a
+ * harmless no-op, which is exactly how the original bug arose.
+ */
+const escapeLiteral = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
 
 /**
  * Compiles one term into a tolerant, anchored regex.
@@ -172,8 +191,19 @@ const compilePattern = (term) => {
   for (let i = 0; i < chars.length; i += 1) {
     const ch = chars[i];
 
-    if (ch === ' ') {
-      // Word gap inside a phrase: optional, and may be any separator run.
+    // Space, hyphen and underscore all mean "word gap here".
+    //
+    // Treating a hyphen as a *literal* was a real bypass, not just a
+    // cosmetic issue: an admin adding "kill-yourself" got a rule that
+    // matched only the hyphenated spelling, while "kill yourself" and
+    // "killyourself" passed straight through. Admins type hyphens as word
+    // separators and reasonably expect all three to be covered.
+    //
+    // This does not weaken the "f-u-c-k" case — that concerns hyphens in
+    // the *input text*, which the SEPARATOR runs between letters handle.
+    if (ch === ' ' || ch === '-' || ch === '_') {
+      // Optional, and may be any run of separators — so the gap matches
+      // "kill yourself", "kill-yourself" and "killyourself" alike.
       parts.push(`${SEPARATOR}{0,4}`);
       continue;
     }
@@ -181,17 +211,24 @@ const compilePattern = (term) => {
     const klass = LETTER_CLASSES[ch];
 
     if (klass) {
-      const cls = `[${escapeForClass(klass)}]{1,3}`;
+      const cls = `[${escapeInClass(klass)}]{1,3}`;
       parts.push(`${cls}(?:${SEPARATOR}{1,3}${cls}){0,2}`);
     } else {
-      parts.push(escapeForClass(ch));
+      // Literal position — must use the literal-safe escaper.
+      parts.push(escapeLiteral(ch));
     }
 
     // Allow separators between letters, but only between letters — not
     // after the final one, or the match would swallow trailing punctuation
     // and the boundary lookahead would misjudge it.
+    // Must skip gap characters too, not just ' '. Emitting SEPARATOR{0,3}
+    // immediately before the gap's own SEPARATOR{0,4} would put two
+    // adjacent variable-length separator runs in the pattern — an
+    // ambiguous overlap that is exactly the backtracking shape the
+    // bounded quantifiers exist to avoid.
     const next = chars[i + 1];
-    if (next !== undefined && next !== ' ') parts.push(`${SEPARATOR}{0,3}`);
+    const nextIsGap = next === ' ' || next === '-' || next === '_';
+    if (next !== undefined && !nextIsGap) parts.push(`${SEPARATOR}{0,3}`);
   }
 
 
@@ -212,14 +249,45 @@ const compilePattern = (term) => {
 const patternCache = new Map();
 const PATTERN_CACHE_LIMIT = 2000;
 
+/**
+ * Terms that could not be compiled, so a broken one is skipped rather than
+ * retried on every single comment.
+ */
+const badTerms = new Set();
+
+/**
+ * Returns the compiled pattern, or `null` if this term cannot be compiled.
+ *
+ * The null path exists because of a real failure: a hyphenated term
+ * produced an invalid `u`-mode escape and `compilePattern` threw, which
+ * propagated out of `analyseText` and broke comment posting for everyone.
+ * The escaping bug is fixed, but a thrown RegExp must never again be able
+ * to take down commenting — admin-supplied terms are arbitrary input, and
+ * this is the boundary where that input becomes a regex.
+ *
+ * So: skip the term, remember it, keep moderating with the rest. Degrading
+ * one entry beats failing every request.
+ */
 const patternFor = (term) => {
   const cached = patternCache.get(term);
   if (cached) return cached;
+  if (badTerms.has(term)) return null;
 
-  const pattern = compilePattern(term);
-  if (patternCache.size < PATTERN_CACHE_LIMIT) patternCache.set(term, pattern);
-  return pattern;
+  try {
+    const pattern = compilePattern(term);
+    if (patternCache.size < PATTERN_CACHE_LIMIT) patternCache.set(term, pattern);
+    return pattern;
+  } catch {
+    // Deliberately not thrown and not logged from this pure module — the
+    // caller owns logging. _badTermCount() lets a health check surface it.
+    badTerms.add(term);
+    return null;
+  }
 };
+
+/** Exposed so callers/tests can assert no term silently failed to compile. */
+export const _badTermCount = () => badTerms.size;
+export const _badTerms = () => [...badTerms];
 
 /** Exposed for tests and diagnostics. */
 export const _patternCacheSize = () => patternCache.size;
@@ -330,6 +398,7 @@ export const analyseText = (text, { terms = [], allowlist = [] } = {}) => {
     if (LETTER_CLASSES[first] && !available.has(first)) continue;
 
     const pattern = patternFor(canonical);
+    if (!pattern) continue; // uncompilable term — skipped, not fatal
     pattern.lastIndex = 0;
     const found = pattern.exec(haystack);
     if (!found) continue;
