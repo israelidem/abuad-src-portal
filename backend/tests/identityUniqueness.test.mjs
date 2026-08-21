@@ -22,11 +22,23 @@ import assert from 'node:assert/strict';
 
 import { signupSchema, updateProfileSchema } from '../src/validators/authSchemas.js';
 
+/*
+ * Matric number, faculty and department joined this fixture when
+ * requirement 6 made the three identity fields mandatory. Without them
+ * every parse below fails on the missing keys rather than on the thing it
+ * means to test — so the fixture is now a *complete* valid signup, and the
+ * tests that care about a missing field remove it explicitly.
+ */
 const validSignup = {
   email: 'student@abuad.edu.ng',
   password: 'correct-horse-battery',
   fullName: 'Ada Lovelace',
+  matricNumber: 'CSC/19/1234',
+  faculty: 'Engineering',
+  department: 'Computer Engineering',
 };
+
+
 
 describe('matric number normalisation', () => {
   // Every spelling a student might plausibly type for one matric number.
@@ -66,19 +78,85 @@ describe('matric number normalisation', () => {
     assert.equal(parsed.matricNumber, 'CSC/19/1234');
   });
 
-  test('an empty matric number is still allowed', () => {
-    // It's optional — staff accounts have none. This must not become a
-    // required field by accident.
-    assert.doesNotThrow(() => signupSchema.parse({ ...validSignup, matricNumber: '' }));
-    assert.doesNotThrow(() => signupSchema.parse(validSignup));
-  });
-
   test('an over-long matric number is rejected', () => {
     assert.throws(() =>
       signupSchema.parse({ ...validSignup, matricNumber: 'X'.repeat(41) })
     );
   });
 });
+
+// ------------------------------------------------------------
+// Requirement 6: the three identity fields are mandatory
+// ------------------------------------------------------------
+
+describe('required identity fields at signup', () => {
+  /*
+   * This block replaces a test that asserted the opposite — "an empty
+   * matric number is still allowed" — because requirement 6 changes that
+   * contract deliberately. The old test's reasoning was that staff
+   * accounts have no matric number; staff are created through the admin
+   * endpoint, which uses createUserSchema and is unaffected, so student
+   * self-registration can require it without locking anyone out.
+   */
+  const missing = (field) => {
+    const body = { ...validSignup };
+    delete body[field];
+    return body;
+  };
+
+
+  for (const field of ['matricNumber', 'faculty', 'department']) {
+    test(`a signup with no ${field} is rejected`, () => {
+      assert.throws(() => signupSchema.parse(missing(field)), { name: 'ZodError' });
+    });
+
+    test(`a signup with an empty ${field} is rejected`, () => {
+      // The bypass this closes: `required` in the DOM is trivially removed,
+      // so a crafted body sends "" and the old schema accepted it via
+      // `.or(z.literal(''))`.
+      assert.throws(
+        () => signupSchema.parse({ ...validSignup, [field]: '' }),
+        { name: 'ZodError' }
+      );
+    });
+
+    test(`a signup with a whitespace-only ${field} is rejected`, () => {
+      // Trimming happens before the length check, so "   " must not slip
+      // through as a non-empty string.
+      assert.throws(
+        () => signupSchema.parse({ ...validSignup, [field]: '   ' }),
+        { name: 'ZodError' }
+      );
+    });
+  }
+
+  test('a complete signup is accepted', () => {
+    const parsed = signupSchema.parse(validSignup);
+    assert.equal(parsed.matricNumber, 'CSC/19/1234');
+    assert.equal(parsed.faculty, 'Engineering');
+    assert.equal(parsed.department, 'Computer Engineering');
+  });
+
+  test('the error messages name the field a student must fix', () => {
+    // Generic copy ("Invalid input") would leave the student guessing
+    // which of the three fields the server objected to.
+    try {
+      signupSchema.parse(missing('matricNumber'));
+      assert.fail('expected a ZodError');
+    } catch (err) {
+      const messages = err.issues.map((i) => i.message).join(' ');
+      assert.match(messages, /matric number/i);
+    }
+  });
+
+
+  test('profile update still allows these fields to be omitted', () => {
+    // A student editing only their name must not be forced to resubmit
+    // everything, and pre-existing accounts with NULLs must stay editable.
+    assert.doesNotThrow(() => updateProfileSchema.parse({ fullName: 'Ada L' }));
+  });
+});
+
 
 describe('email normalisation', () => {
   test('case and surrounding whitespace are normalised', () => {
