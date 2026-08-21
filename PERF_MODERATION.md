@@ -58,21 +58,44 @@ This is the risk in the whole technique: a prefilter bug fails *open* and
 silently, and only a detection test catches it. Two prefilter bugs in one
 change, for a 9% gain, is a poor trade — see the recommendation below.
 
-## Unresolved discrepancy between the two harnesses
+## Resolved: why my harnesses disagreed by up to 7x
 
-For nominally identical work (400 terms, 2000-char body) the two scripts
-disagree:
+Three scripts reported wildly different costs for identical work (400 terms,
+~2000-char body):
 
-- `probe-steady-state.mjs` (via `evaluateComment`): median **4.33 ms**
-- `ab-prefilter.mjs` (via `analyseText`): **11.56 ms**
+| harness | entry point | warm-up | reported |
+|---|---|---|---|
+| `ab-prefilter.mjs` | `analyseText` | 1 call | 11.56 ms |
+| `probe-steady-state.mjs` | `evaluateComment` | 1 call | 4.33 ms |
+| `capacity-model.mjs` (first version) | `evaluateComment` | 1 call | 2.34 ms |
 
-~2.7x apart. Candidate causes, none confirmed: the async `evaluateComment`
-path yields between calls and lets GC run, whereas the tight synchronous
-loop accumulates pressure; or the service layer filters/dedups terms before
-reaching `analyseText`. **I have not identified which, so neither figure
-should be treated as the per-comment cost.** The order of magnitude —
-single-digit-to-low-tens of milliseconds of synchronous CPU per comment —
-is the part both agree on and the only part I would rely on.
+I assumed the entry point was responsible — that `evaluateComment` must be
+doing less work than `analyseText`. **That was wrong.**
+`scripts/resolve-discrepancy.mjs` crosses both entry points with both loop
+styles, after 30 warm iterations:
+
+```
+                     tight loop     await loop
+  analyseText         1.58 ms         1.56 ms
+  evaluateComment     1.55 ms         1.58 ms
+```
+
+All four agree within 1%. The entry point is irrelevant, and so is whether
+the loop `await`s. **The variable was warm-up depth.** V8 tiers a RegExp up
+from the interpreter only after it has executed enough times; with 400
+patterns that takes a few hundred moderations. Every earlier script warmed
+with a single call and then spent its measurement window watching V8
+optimise, so each one caught the curve at a different point.
+
+Steady state is **~1.6 ms** per comment (400 terms, pangram worst case,
+2 logical CPUs). `capacity-model.mjs` now warms 60 iterations and reports
+~2.1 ms sustained over a 3-second window; the residual ~35% over the
+1.56 ms figure is GC pressure from an unbroken 3-second allocation loop,
+which a real server interleaving I/O would not accumulate in the same way.
+
+Lesson worth keeping: with a few hundred regexes, a benchmark that warms up
+once is not measuring the code, it is measuring the JIT.
+
 
 ## Standing recommendation
 
@@ -83,7 +106,15 @@ pass over the text regardless of list size, with no fail-open prefilter to
 get subtly wrong. That is a larger change than this task should absorb, but
 it is the fix if comment throughput ever becomes the binding constraint.
 
-Until then the honest statement is: per-comment moderation costs single-digit
-to low-tens of milliseconds of **synchronous, event-loop-blocking** CPU, and
-that cost is what limits comment submissions per second on a single Node
-process — not the database.
+Until then the honest statement is: once warm, per-comment moderation costs
+**~1.6–2.1 ms of synchronous, event-loop-blocking CPU** at the 400-term cap
+on a 2-CPU machine, implying a ceiling of roughly **470 comment submissions
+per second** per Node process. Cold, before V8 tiers the patterns up, the
+first few hundred comments cost several times that — which is what the
+`warmPatternCache` boot step exists to absorb.
+
+That ceiling applies to comment *submission* only. It says nothing about
+dashboard reads, logins, or uploads, and it is not a statement about
+end-to-end capacity — see `LOAD_TESTING.md`.
+
+
