@@ -85,7 +85,26 @@ export function ToastProvider({ children }) {
         role="region"
         aria-live="polite"
         aria-label="Notifications"
-        className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-full max-w-sm flex-col gap-2 px-4 sm:px-0"
+        /*
+         * Positioning, and why it is written this way.
+         *
+         * It used to be `fixed bottom-4 right-4 w-full max-w-sm px-4`. On a
+         * phone `max-w-sm` (24rem) is wider than the viewport, so `w-full`
+         * resolved to 100vw and the box was anchored 1rem from the right —
+         * putting its left edge 1rem *outside* the viewport. The toast then
+         * looked shifted off-centre to the left and, because a fixed element
+         * still counts towards the document's scroll width in every engine
+         * except when it is clipped, the page gained a horizontal scroll.
+         * The `px-4` was compensation for that, not layout.
+         *
+         * Now: on mobile the container is pinned to both edges
+         * (`inset-x-3`), so it is exactly as wide as the space available and
+         * cannot overflow in either direction whatever the viewport. From
+         * `sm` up it reverts to a right-anchored column with an intrinsic
+         * width, where `max-w-sm` is genuinely narrower than the viewport.
+         */
+        className="pointer-events-none fixed inset-x-3 bottom-3 z-50 flex flex-col gap-2 sm:inset-x-auto sm:bottom-4 sm:right-4 sm:w-full sm:max-w-sm"
+
       >
         {toasts.map(({ id, message, variant, action }) => {
           const { icon: Icon, className } = VARIANTS[variant] ?? VARIANTS.info;

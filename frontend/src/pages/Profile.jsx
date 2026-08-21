@@ -10,7 +10,9 @@ import { Check, Mail, Shield } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 import { Spinner } from '../components/Spinner.jsx';
+import RoleBadge from '../components/RoleBadge.jsx';
 import NotificationSettings from '../components/NotificationSettings.jsx';
+
 
 const FIELDS = [
   { name: 'fullName', label: 'Full name', required: true },
@@ -19,11 +21,18 @@ const FIELDS = [
   { name: 'department', label: 'Department' },
 ];
 
+/*
+ * SUPER_ADMIN and DEV were missing, so those accounts saw the raw enum
+ * ("SUPER_ADMIN") on their own profile via the `?? profile?.role` fallback.
+ */
 const ROLE_LABELS = {
   STUDENT: 'Student',
   REP: 'SRC Representative',
   ADMIN: 'Administrator',
+  SUPER_ADMIN: 'Super Administrator',
+  DEV: 'Developer',
 };
+
 
 export default function Profile() {
   const { profile, user, updateProfile } = useAuth();
@@ -75,7 +84,12 @@ export default function Profile() {
         <p className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
           <Shield size={15} className="text-slate-400 dark:text-slate-500" />
           {ROLE_LABELS[profile?.role] ?? profile?.role}
+          {/* The badge on the owner's own profile, so an admin can see the
+              mark other users see beside their name. Nothing renders for a
+              student, keeping the row unchanged for most accounts. */}
+          <RoleBadge role={profile?.role} size={15} />
         </p>
+
       </div>
 
       <form

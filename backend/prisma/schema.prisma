@@ -21,9 +21,16 @@ datasource db {
 // ENUMS
 // ------------------------------------------------------------
 
+/// Privilege levels, lowest first.
+///
+/// DEV is the maintainer's role: everything SUPER_ADMIN can do, plus
+/// protection from account-management actions taken by a super admin
+/// (see backend/src/config/roles.js, which is the single source of truth
+/// for the hierarchy, and migration 05_dev_role.sql for the SQL side).
 enum UserRole {
   STUDENT
   REP
+
   ADMIN
   /// The "absolute admin". Outranks ADMIN and is deliberately hard to
   /// remove: a SUPER_ADMIN can only be demoted or deactivated by another
@@ -31,7 +38,13 @@ enum UserRole {
   /// Without that floor, two admins could lock each other out and leave
   /// the portal with nobody able to restore access.
   SUPER_ADMIN
+  /// The maintainer. Holds every SUPER_ADMIN permission and is additionally
+  /// protected: a SUPER_ADMIN cannot demote, deactivate or delete a DEV,
+  /// and cannot grant the DEV role to anyone. Only a DEV may manage a DEV.
+  /// Enforced in canManageAccount/canGrantRole, not in the UI.
+  DEV
 }
+
 
 enum TicketStatus {
   PENDING

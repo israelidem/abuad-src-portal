@@ -16,12 +16,42 @@ import { authApi, adminApi } from '../lib/api.js';
 import { Spinner } from '../components/Spinner.jsx';
 import Logo from '../components/Logo.jsx';
 
+/*
+ * Every field here is now required (requirement 6). The three identity
+ * fields were optional and labelled "Optional", so most registrations
+ * arrived without them and tickets could not be attributed to a faculty
+ * or department — the dimension the whole board is filtered by.
+ *
+ * `required` drives the asterisk, the `required` attribute and the
+ * pre-submit check below from one place, so the three cannot disagree.
+ * signupSchema on the server enforces the same rule; this only saves a
+ * round trip.
+ */
 const FIELDS = [
   { name: 'fullName', label: 'Full name', type: 'text', required: true, autoComplete: 'name' },
-  { name: 'matricNumber', label: 'Matriculation number', type: 'text', placeholder: 'Optional' },
-  { name: 'faculty', label: 'Faculty', type: 'text', placeholder: 'Optional' },
-  { name: 'department', label: 'Department', type: 'text', placeholder: 'Optional' },
+  {
+    name: 'matricNumber',
+    label: 'Matriculation number',
+    type: 'text',
+    required: true,
+    placeholder: 'e.g. 20/ENG01/001',
+    // A concrete example rather than "Optional": the format is not
+    // obvious, and the value is normalised (upper-cased, spaces removed)
+    // on the server, so the student cannot get the casing wrong.
+    autoComplete: 'off',
+  },
+  { name: 'faculty', label: 'Faculty', type: 'text', required: true, placeholder: 'e.g. Engineering' },
+  { name: 'department', label: 'Department', type: 'text', required: true, placeholder: 'e.g. Computer Engineering' },
 ];
+
+/** Message shown when a required field is submitted empty. */
+const REQUIRED_MESSAGES = {
+  fullName: 'Please enter your full name.',
+  matricNumber: 'Please enter your matric number.',
+  faculty: 'Please enter your faculty.',
+  department: 'Please enter your department.',
+};
+
 
 export default function Signup() {
   const { signUp } = useAuth();
@@ -89,9 +119,40 @@ export default function Signup() {
     event.preventDefault();
     setError('');
     setFieldErrors({});
+
+    /*
+     * Client-side required check.
+     *
+     * The form carries `noValidate`, so the browser's own bubbles never
+     * appear and the `required` attributes alone would let an empty
+     * submission through to the API. Checking here keeps the errors in the
+     * page's own style, next to the offending field, and shows all of them
+     * at once instead of one per round trip.
+     *
+     * Trimmed, so "   " is not accepted — matching the server, which
+     * trims before its own min(1).
+     *
+     * This is a convenience, not the gate: signupSchema rejects the same
+     * request if it arrives anyway.
+     */
+    const missing = {};
+    for (const { name, required } of FIELDS) {
+      if (required && !form[name].trim()) missing[name] = REQUIRED_MESSAGES[name];
+    }
+
+    if (Object.keys(missing).length) {
+      setFieldErrors(missing);
+      setError('Please complete all required fields.');
+      // Focus the first offender: on a phone the error can easily be off
+      // screen, and a form that "does nothing" on tap is the result.
+      document.getElementById(Object.keys(missing)[0])?.focus();
+      return;
+    }
+
     setSubmitting(true);
 
     try {
+
       const result = await signUp(form);
 
       if (result.session) {

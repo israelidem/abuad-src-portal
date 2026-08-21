@@ -8,6 +8,72 @@
  */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/*
+ * ------------------------------------------------------------
+ * Viewport containment
+ * ------------------------------------------------------------
+ *
+ * The bug this fixes: on a phone the notification bell, toasts and the
+ * success/error/update messages all appeared shifted towards the left,
+ * with the page scrollable sideways by a few dozen pixels.
+ *
+ * The cause was not the individual components. It was that several of
+ * them sized themselves from `100vw` — the toast container via
+ * `w-full max-w-sm` anchored to `right-4`, the notification panel via
+ * `w-[calc(100vw-2rem)]`. `100vw` is the width of the viewport
+ * *including* the classic scrollbar, and it takes no account of the
+ * element's own offset. Any one of those elements being a few pixels too
+ * wide extends the document's scroll width; the browser then lets the
+ * user scroll right, and because the body is centred inside a now-wider
+ * scroll area, *everything* looks nudged left. Patching each element
+ * with a different offset would have hidden the symptom on one device
+ * and moved it to the next.
+ *
+ * Two rules deal with it at the root:
+ *
+ *  1. `overflow-x: clip` on the document. `clip` rather than `hidden`
+ *     because `hidden` on <html>/<body> creates a scroll container,
+ *     which breaks `position: sticky` descendants (the header) and, on
+ *     iOS Safari, momentum scrolling. `clip` only forbids the overflow.
+ *     This is a safety net, not a licence: it stops one bad width from
+ *     dragging the entire layout sideways.
+ *
+ *  2. `--app-safe-width`, the usable width inside the safe-area insets.
+ *     Components that must not exceed the viewport clamp against this
+ *     instead of guessing with `100vw`. `100dvw` excludes the classic
+ *     scrollbar and tracks the dynamic viewport on mobile, so it is
+ *     correct in the cases where `100vw` is not.
+ */
+:root {
+  --app-safe-width: calc(
+    100dvw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - 1.5rem
+  );
+}
+
+html {
+  overflow-x: clip;
+}
+
+body {
+  overflow-x: clip;
+  /*
+   * Belt and braces for the "parent wider than the viewport" case: a
+   * single overflowing child can no longer make the body itself wider
+   * than the space available to it.
+   */
+  max-width: 100%;
+}
+
+/*
+ * Long unbroken strings — a pasted URL in a comment, a matric number, a
+ * ticket reference — are the other everyday source of horizontal
+ * overflow, and the one most likely to appear in user-generated content.
+ * Breaking them is always preferable to a sideways-scrolling page.
+ */
+body {
+  overflow-wrap: break-word;
+}
+
 /* Respect users who have asked for less motion. */
 @media (prefers-reduced-motion: reduce) {
   *,

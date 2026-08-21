@@ -64,8 +64,25 @@ export default function ResolutionActions({ ticket, onChanged }) {
 
   const [score, setScore] = useState(0);
   const [comment, setComment] = useState('');
-  const [rated, setRated] = useState(Boolean(ticket.rating));
+  /*
+   * The rating already on record, or null.
+   *
+   * Seeded from `ticket.rating`, which the API serialises from the
+   * TicketRating row for the signed-in reporter. That is what makes the
+   * prompt stay gone: a refresh, a re-login or a fresh navigation all
+   * re-read it from the database, so there is no local-only flag that a
+   * reload could forget.
+   *
+   * Held in state as well so the panel can switch to the thank-you view
+   * the moment the POST returns, without waiting for a re-fetch.
+   */
+  const [submitted, setSubmitted] = useState(ticket.rating ?? null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Prefer whatever the server last told us. `submitted` covers both the
+  // seeded value and the just-posted one, so one flag drives the view.
+  const rated = Boolean(submitted);
+
 
   const [reopening, setReopening] = useState(false);
   const [reason, setReason] = useState('');
@@ -79,17 +96,30 @@ export default function ResolutionActions({ ticket, onChanged }) {
     event.preventDefault();
     if (!score) return;
 
+    const trimmed = comment.trim();
+
     setSubmitting(true);
     try {
-      await ticketApi.rate(ticket.id, score, comment.trim() || undefined);
-      setRated(true);
+      // The response carries the stored row back; keeping it means the
+      // summary below shows what was actually saved rather than what was
+      // typed. The `?? {...}` covers an older API that returns no body.
+      const result = await ticketApi.rate(ticket.id, score, trimmed || undefined);
+      setSubmitted(result?.rating ?? { score, comment: trimmed || null });
       toast.success('Thank you — your feedback helps the SRC improve.');
+      // Refresh the parent so the new RATED entry appears in the activity
+      // timeline immediately, instead of only after the next page load.
+      onChanged?.();
     } catch (err) {
       // A 409 means it was already rated, which is a success from the
       // student's point of view, not an error to shout about.
+      //
+      // Reached when the same student submits twice from two tabs: the
+      // unique constraint rejects the second write. Treat it as done and
+      // reload so the panel shows the rating that actually won.
       if (err.status === 409) {
-        setRated(true);
+        setSubmitted({ score, comment: trimmed || null });
         toast.info('You have already rated this report.');
+        onChanged?.();
       } else {
         toast.error(err.displayMessage);
       }
@@ -97,6 +127,7 @@ export default function ResolutionActions({ ticket, onChanged }) {
       setSubmitting(false);
     }
   };
+
 
   const submitReopen = async (event) => {
     event.preventDefault();
@@ -144,10 +175,33 @@ export default function ResolutionActions({ ticket, onChanged }) {
           </button>
         </form>
       ) : (
-        <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
-          Your rating has been recorded.
-        </p>
+        /*
+          Show what was recorded, not just that something was. This is the
+          confirmation that the feedback landed — and if the student
+          returns weeks later it answers "did I already rate this?" without
+          them having to guess from the absence of a form.
+        */
+        <div className="mt-2 space-y-1">
+          <p className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+            <span className="text-amber-400" aria-hidden="true">
+              {'★'.repeat(submitted.score)}
+              <span className="text-slate-300 dark:text-slate-600">
+                {'★'.repeat(5 - submitted.score)}
+              </span>
+            </span>
+            <span>
+              You rated this {submitted.score}/5
+              {SCORE_LABELS[submitted.score] ? ` — ${SCORE_LABELS[submitted.score]}` : ''}
+            </span>
+          </p>
+          {submitted.comment && (
+            <p className="border-l-2 border-slate-200 pl-2 text-sm italic text-slate-600 dark:border-slate-800 dark:text-slate-400">
+              {submitted.comment}
+            </p>
+          )}
+        </div>
       )}
+
 
       <div className="mt-5 border-t border-slate-100 pt-4 dark:border-slate-800">
         {!showReopen ? (

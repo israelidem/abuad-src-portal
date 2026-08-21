@@ -175,6 +175,48 @@ router.patch(
       }
     }
 
+    /*
+     * Requirement 6's other half: the three identity fields are mandatory
+     * at signup, so this endpoint must not be the way they get emptied
+     * again. `matricNumber: ''` would otherwise be written as null below
+     * and quietly undo the registration requirement.
+     *
+     * Scoped to fields that currently *hold* a value. Accounts created
+     * before this release have NULLs, and the brief requires they keep
+     * working — so a legacy profile may still be saved with them blank
+     * (and filling one in is a one-way improvement). What is refused is
+     * clearing a value that is already there.
+     */
+    const clearing = [];
+    if (matricNumber !== undefined && !matricNumber) clearing.push('matricNumber');
+    if (faculty !== undefined && !faculty) clearing.push('faculty');
+    if (department !== undefined && !department) clearing.push('department');
+
+    if (clearing.length) {
+      // One read, only when something is actually being blanked.
+      const current = await prisma.profile.findUnique({
+        where: { id: req.user.id },
+        select: { matricNumber: true, faculty: true, department: true },
+      });
+
+      const LABELS = {
+        matricNumber: 'matric number',
+        faculty: 'faculty',
+        department: 'department',
+      };
+
+      const wouldClear = clearing.filter((f) => current?.[f]);
+      if (wouldClear.length) {
+        throw new ApiError(
+          400,
+          `Your ${wouldClear
+            .map((f) => LABELS[f])
+            .join(', ')} cannot be removed. Update it to a new value instead.`
+        );
+      }
+    }
+
+
     const updated = await prisma.profile.update({
       where: { id: req.user.id },
       data: {

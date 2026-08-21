@@ -163,15 +163,31 @@ export default function NotificationBell() {
       </button>
 
       {open && (
-        // Width is viewport-relative below sm. A fixed w-80 (320px) is
-        // exactly the width of the smallest phones in use, so with the
-        // header's px-4 the panel was clipped at the screen edge and the
-        // right-hand side of every notification was unreadable.
+        /*
+         * Width and anchoring.
+         *
+         * This was `w-[calc(100vw-2rem)]`, which assumes the button sits
+         * exactly 1rem from the right edge of the viewport. That is true on
+         * one layout and wrong everywhere else: `100vw` also *includes* the
+         * classic scrollbar on desktop, so the panel was consistently a
+         * scrollbar-width too wide and pushed the document's scroll width
+         * past the viewport — the horizontal drift that made the whole
+         * header look off-centre on a phone.
+         *
+         * `min()` against the real distance from the panel's right edge to
+         * the left edge of the viewport is not expressible in CSS, so the
+         * panel is instead clamped to the *available* width using the
+         * padding-aware custom property set in index.css, falling back to a
+         * plain 20rem. Combined with `overflow-x: clip` on the document,
+         * the panel can no longer contribute to page overflow regardless of
+         * where in the header it is mounted.
+         */
         <div
           role="region"
           aria-label="Notifications"
-          className="absolute right-0 z-50 mt-2 w-[calc(100vw-2rem)] max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg sm:w-80 dark:border-slate-800 dark:bg-slate-900"
+          className="absolute right-0 z-50 mt-2 w-[min(20rem,var(--app-safe-width,20rem))] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg dark:border-slate-800 dark:bg-slate-900"
         >
+
 
           <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5 dark:border-slate-800">
             <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Notifications</h2>

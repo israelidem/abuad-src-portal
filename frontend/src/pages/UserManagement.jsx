@@ -13,8 +13,18 @@ import { adminApi } from '../lib/api.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 import { Spinner } from '../components/Spinner.jsx';
+import RoleBadge from '../components/RoleBadge.jsx';
 import AddUserDialog from '../components/AddUserDialog.jsx';
 
+
+/*
+ * DEV is deliberately absent from the assignable list.
+ *
+ * The API refuses to grant it (only an existing DEV can), so offering it
+ * in the dropdown would be an option that always fails. DEV accounts are
+ * provisioned directly, and a DEV's row renders as a read-only label
+ * because `canManage` returns false for it.
+ */
 const ROLES = ['STUDENT', 'REP', 'ADMIN', 'SUPER_ADMIN'];
 
 const ROLE_STYLES = {
@@ -22,7 +32,10 @@ const ROLE_STYLES = {
   REP: 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300',
   ADMIN: 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300',
   SUPER_ADMIN: 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300',
+  // Cyan for DEV, matching the diamond badge's palette.
+  DEV: 'bg-cyan-100 text-cyan-900 dark:bg-cyan-950 dark:text-cyan-300',
 };
+
 
 export default function UserManagement() {
   const { profile, isSuperAdmin } = useAuth();
@@ -100,9 +113,26 @@ export default function UserManagement() {
     }
   };
 
-  /** Mirrors the API's assertCanManage so we don't offer doomed actions. */
-  const canManage = (user) =>
-    user.id !== profile?.id && (user.role !== 'SUPER_ADMIN' || isSuperAdmin);
+  /**
+   * Mirrors the API's assertCanManage so we don't offer doomed actions.
+   *
+   * The DEV clause is the UI half of requirement 7: a DEV account is not
+   * manageable by anyone but another DEV, so a super admin sees a
+   * read-only label instead of a role dropdown and a "Deactivate" link.
+   *
+   * This is presentation only. assertCanManage refuses the same
+   * combination on PATCH /users/:id/role and /users/:id/status, so a
+   * hand-crafted request gets a 403 whatever this returns — which is the
+   * point of putting the rule in both places rather than only here.
+   */
+  const canManage = (user) => {
+    if (user.id === profile?.id) return false;
+    // Protected from everyone except another DEV.
+    if (user.role === 'DEV') return profile?.role === 'DEV';
+    if (user.role === 'SUPER_ADMIN') return isSuperAdmin;
+    return true;
+  };
+
 
   /**
    * A new account belongs at the top of an unfiltered first page, and
@@ -180,9 +210,13 @@ export default function UserManagement() {
               {users.map((user) => (
                 <tr key={user.id} className={user.isActive ? '' : 'opacity-60'}>
                   <td className="px-4 py-3">
-                    <div className="font-medium text-slate-900 dark:text-white">
+                    <div className="flex items-center gap-1 font-medium text-slate-900 dark:text-white">
                       {user.fullName}
+                      {/* Same badge as the comment and activity lists, so an
+                          admin recognises a privileged account here too. */}
+                      <RoleBadge role={user.role} size={13} />
                     </div>
+
                     <div className="text-xs text-slate-500 dark:text-slate-400">
                       {user.email}
                       {user.matricNumber && ` · ${user.matricNumber}`}

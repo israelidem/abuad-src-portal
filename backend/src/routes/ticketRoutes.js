@@ -46,7 +46,10 @@ import {
   canEditTicket,
   canDeleteTicket,
   isStaffUser,
+  canCommentOnTicket,
+  canDeleteComment,
   ticketInclude,
+
   authorSelect,
   serialiseTicket,
   serialiseComment,
@@ -655,12 +658,33 @@ router.post(
       include: { author: { select: { id: true } } },
     });
 
-    if (ticket.status === 'CLOSED') {
-      throw new ApiError(400, 'This ticket is closed. Reopen it to continue the discussion.');
+    /*
+     * The resolved/closed lock, enforced here and not only in the UI.
+     *
+     * This replaces a bare `status === 'CLOSED'` check that let students
+     * keep commenting on RESOLVED reports. canCommentOnTicket is the same
+     * function serialiseTicket uses for `permissions.canComment`, so a
+     * student who hides the disabled button, replays the request from
+     * devtools or posts straight to the API with curl gets the identical
+     * refusal — the button and the rule cannot drift apart because there
+     * is only one rule.
+     *
+     * Staff pass, deliberately: reps still add closing notes after
+     * resolution, and PATCH /:id/status writes its `note` through this
+     * same table.
+     */
+    const commentGate = canCommentOnTicket(ticket, req.user);
+    if (!commentGate.allowed) {
+      // 409 rather than 400: the request is well-formed, it conflicts with
+      // the report's current state. A client can therefore distinguish
+      // "you typed something invalid" from "the thread has since closed"
+      // and refresh instead of asking the student to edit their text.
+      throw new ApiError(409, commentGate.reason);
     }
 
     // isInternal is staff-only regardless of what the client sends
     const staff = isStaffUser(req.user);
+
     const isInternal = staff && req.body.isInternal === true;
 
     // Automatic moderation. Runs before the insert so the comment is
@@ -793,7 +817,12 @@ router.patch(
 );
 
 
-/** DELETE /api/tickets/:id/comments/:commentId — author or staff. */
+/**
+ * DELETE /api/tickets/:id/comments/:commentId
+ *
+ * The author within 30 minutes of posting, or staff at any time under the
+ * existing moderation rules.
+ */
 router.delete(
   '/:id/comments/:commentId',
   requireAuth,
@@ -806,16 +835,58 @@ router.delete(
       throw new ApiError(404, 'Comment not found.');
     }
 
-    const staff = isStaffUser(req.user);
-    if (comment.authorId !== req.user.id && !staff) {
-      throw new ApiError(403, 'You can only delete your own comments.');
+    /*
+     * Ownership *and* the time window are decided by canDeleteComment,
+     * against `comment.createdAt` as stored by Postgres and the server's
+     * own clock.
+     *
+     * Nothing here comes from the request: no client timestamp, no
+     * client-declared role, no "minutes elapsed" field. That is what makes
+     * the window unforgeable — a crafted DELETE with a doctored body or a
+     * skewed system clock is evaluated against exactly the same two values
+     * as a click in the UI. The row's `created_at` is only ever written by
+     * the database default, so it cannot be back-dated through the API
+     * either.
+     */
+    const gate = canDeleteComment(comment, req.user);
+    if (!gate.allowed) {
+      /*
+       * 403 both for "not yours" and for "too late". Two different codes
+       * would let a student probe whether a given comment id is theirs, or
+       * how old someone else's comment is.
+       */
+      throw new ApiError(403, gate.reason);
     }
 
+    /*
+     * Hard delete, matching the existing behaviour of this endpoint.
+     *
+     * Soft delete was considered and rejected: ticket_comments has no
+     * deleted_at column, and adding one for this path alone would mean
+     * every existing read (the GET above, the moderation queue, the
+     * comment_count trigger, the moderation audit view) needs a matching
+     * filter. Miss one and "deleted" comments come back — a worse failure
+     * than the one being fixed.
+     *
+     * Auditability is preserved where this codebase already keeps it: the
+     * COMMENTED timeline event is not removed, so the record that the
+     * student commented at that time survives the text being withdrawn,
+     * and moderation_actions rows already written for the comment remain
+     * (moderated_by is ON DELETE SET NULL, not CASCADE).
+     *
+     * No moderation_actions row is written here. MODERATION_ACTION has no
+     * DELETED member and the column is constrained to that set, so
+     * inventing one would need a migration and would fail the CHECK until
+     * it ran. Staff deletion is therefore left exactly as it behaved
+     * before this change.
+     */
     await prisma.ticketComment.delete({ where: { id: comment.id } });
+
 
     res.json({ message: 'Comment deleted.' });
   })
 );
+
 
 // ------------------------------------------------------------
 // Satisfaction rating & reopen (Phase 4b)
@@ -865,10 +936,26 @@ router.post(
         actorId: req.user.id,
         type: 'RATED',
         to: String(req.body.score),
+        /*
+         * The comment is denormalised onto the event so the timeline can
+         * show what was actually said, not just "Resolution rated".
+         *
+         * `toValue` already held the score, which is why the timeline could
+         * have rendered "4/5" all along; the text was the missing half. It
+         * is copied rather than joined because ticket_events is the
+         * immutable record of what happened at that moment — the same
+         * reason DEPARTMENT_CHANGED stores `toName`. The canonical copy
+         * remains ticket_ratings, and TicketTimeline prefers the live
+         * rating when the API supplies one, so historical events written
+         * before this change still render their score and gain their
+         * comment from the joined record.
+         */
+        metadata: req.body.comment ? { comment: req.body.comment } : undefined,
       });
 
       return created;
     });
+
 
     // Tell whoever handled it. Praise is as useful as complaint, and
     // silence after a fix is what makes reps stop caring.

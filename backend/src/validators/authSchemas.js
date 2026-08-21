@@ -19,15 +19,56 @@ const matricNumber = z
   .optional()
   .or(z.literal(''));
 
+/**
+ * Registration identity fields — mandatory as of requirement 6.
+ *
+ * Previously all three were `.optional().or(z.literal(''))`, so the API
+ * accepted a registration with none of them and the frontend's `required`
+ * attributes were the only thing asking. A ticket then arrived with no way
+ * to tell which faculty or department it came from, which is the reporting
+ * dimension the whole board is filtered by.
+ *
+ * Declared here rather than in the route because this schema is the only
+ * gate on POST /api/auth/signup: a crafted request with `{"faculty": ""}`
+ * is rejected by `.min(1)` before the handler runs.
+ *
+ * Deliberately *not* a NOT NULL column. Students who registered before
+ * this release have NULLs, and a constraint would either fail to apply or
+ * force placeholder data onto real accounts. See 05_dev_role.sql §4.
+ *
+ * The empty-string variant is dropped on purpose — `.optional()` plus
+ * `z.literal('')` is what made "" acceptable, and keeping either would
+ * reintroduce the hole this closes.
+ */
+const requiredMatricNumber = z
+  .string({ required_error: 'Please enter your matric number.' })
+  .trim()
+  .min(1, 'Please enter your matric number.')
+  .max(40)
+  // Same normalisation as the optional variant: whitespace stripped and
+  // upper-cased, so "18/eng01/001" and "18/ENG01/001 " cannot both be
+  // registered as distinct students.
+  .transform((v) => v.replace(/\s+/g, '').toUpperCase())
+  // Re-checked after the transform: a value of "   " passes .min(1) as
+  // typed and collapses to "" here.
+  .pipe(z.string().min(1, 'Please enter your matric number.'));
+
 export const signupSchema = z.object({
   email:        z.string().trim().toLowerCase().email('Please enter a valid email address.'),
   password:     z.string().min(8, 'Password must be at least 8 characters.').max(72),
   fullName:     z.string().trim().min(2, 'Please enter your full name.').max(120),
-  matricNumber,
-  faculty:      z.string().trim().max(120).optional().or(z.literal('')),
-  department:   z.string().trim().max(120).optional().or(z.literal('')),
-  // NOTE: `role` is deliberately absent — it can never be set by the client.
+  matricNumber: requiredMatricNumber,
+  faculty:      z.string({ required_error: 'Please select your faculty.' })
+                  .trim()
+                  .min(1, 'Please select your faculty.')
+                  .max(120),
+  department:   z.string({ required_error: 'Please select your department.' })
+                  .trim()
+                  .min(1, 'Please select your department.')
+                  .max(120),
+  // NOTE: `role` is deliberately absent - it can never be set by the client.
 });
+
 
 export const updateProfileSchema = z.object({
   fullName:     z.string().trim().min(2).max(120).optional(),

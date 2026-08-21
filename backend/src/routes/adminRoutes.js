@@ -25,6 +25,10 @@ import {
 } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import { adminWriteLimiter } from '../middleware/rateLimiter.js';
+// The role hierarchy, declared once. See config/roles.js for why these are
+// not spelled out inline here any more.
+import { ROLES, canManageAccount, canGrantRole } from '../config/roles.js';
+
 
 import { getSettings, updateSettings } from '../services/settingsService.js';
 import { invalidateUser } from '../services/authCache.js';
@@ -150,9 +154,19 @@ router.get(
 // User management — ADMIN and above
 // ------------------------------------------------------------
 
+/*
+ * Derived from ROLES so a new role cannot be silently unassignable.
+ *
+ * DEV is accepted by the schema but is *not* thereby grantable: canGrantRole
+ * below refuses any role the caller does not itself hold, so only a DEV can
+ * hand out DEV. Validating the shape and authorising the privilege are kept
+ * separate on purpose — a 400 "unknown role" would wrongly suggest the role
+ * does not exist.
+ */
 const roleSchema = z.object({
-  role: z.enum(['STUDENT', 'REP', 'ADMIN', 'SUPER_ADMIN']),
+  role: z.enum(ROLES),
 });
+
 
 const activeSchema = z.object({ isActive: z.boolean() });
 
@@ -170,7 +184,10 @@ const createUserSchema = z.object({
   // is handed over out-of-band, so it should not also be weak.
   password: z.string().min(12).max(128),
   fullName: z.string().trim().min(2).max(120),
-  role: z.enum(['STUDENT', 'REP', 'ADMIN', 'SUPER_ADMIN']).default('STUDENT'),
+  // From ROLES for the same reason as roleSchema. Authorisation is the
+  // canGrantRole check in the handler, not this enum.
+  role: z.enum(ROLES).default('STUDENT'),
+
   matricNumber: z.string().trim().max(50).optional().or(z.literal('')),
   faculty: z.string().trim().max(120).optional().or(z.literal('')),
   department: z.string().trim().max(120).optional().or(z.literal('')),
@@ -201,7 +218,20 @@ router.post(
   asyncHandler(async (req, res) => {
     const { email, password, fullName, role, matricNumber, faculty, department } = req.body;
 
+    /*
+     * The same "cannot grant what you do not hold" rule as /users/:id/role.
+     *
+     * This endpoint previously trusted its Zod enum, which topped out at
+     * SUPER_ADMIN and made the omission harmless. Now that DEV exists,
+     * creating an account is a second path to minting one, and an
+     * account-creation hole is worse than a promotion hole: there is no
+     * prior row and therefore nothing for assertCanManage to protect.
+     */
+    const grant = canGrantRole(req.user, role);
+    if (!grant.allowed) throw new ApiError(403, grant.reason);
+
     // Same ordering as public signup, for the same reason: a duplicate
+
     // matric number found *after* the auth user exists would leave an
     // orphan, and the corrected retry would then fail on "email already
     // registered" — a confusing dead end for whoever is being onboarded.
@@ -336,17 +366,27 @@ router.get(
 const assertCanManage = (actor, target) => {
   if (!target) throw new ApiError(404, 'User not found.');
 
-  if (target.id === actor.id) {
-    throw new ApiError(
-      400,
-      'You cannot change your own role or status. Ask another admin to do it.'
-    );
-  }
-
-  if (target.role === 'SUPER_ADMIN' && actor.role !== 'SUPER_ADMIN') {
-    throw new ApiError(403, 'Only a super admin can modify another super admin.');
+  /*
+   * Delegated to config/roles.js. The two rules above are unchanged — they
+   * are now expressed as ranks there — and a third is added with them: a
+   * protected role (DEV) can only be managed by an equal or higher rank,
+   * so a SUPER_ADMIN cannot demote, deactivate or delete a DEV.
+   *
+   * Centralised deliberately. This helper guards both /role and /status,
+   * but the rule also has to hold for account deletion and any endpoint
+   * added later; keeping the logic in one exported function is what makes
+   * "check every account-management endpoint" a tractable claim rather
+   * than a promise to grep carefully.
+   */
+  const decision = canManageAccount(actor, target);
+  if (!decision.allowed) {
+    // 400 for the self-management case (a client mistake, not a privilege
+    // problem), 403 for the rest — preserving the status codes the admin
+    // UI already distinguishes.
+    throw new ApiError(actor.id === target.id ? 400 : 403, decision.reason);
   }
 };
+
 
 /** Refuses to remove the last SUPER_ADMIN, whatever the caller's role. */
 const assertNotLastSuperAdmin = async (target) => {
@@ -375,11 +415,25 @@ router.patch(
     const target = await prisma.profile.findUnique({ where: { id: req.params.id } });
     assertCanManage(req.user, target);
 
-    // Granting SUPER_ADMIN is itself a super-admin action — an ADMIN
-    // promoting themselves a deputy would be a privilege escalation.
-    if (req.body.role === 'SUPER_ADMIN' && req.user.role !== 'SUPER_ADMIN') {
-      throw new ApiError(403, 'Only a super admin can grant super admin.');
-    }
+    /*
+     * You cannot grant a role you do not hold.
+     *
+     * This generalises the previous SUPER_ADMIN-only check. It still stops
+     * an ADMIN promoting themselves a deputy, and it additionally stops a
+     * SUPER_ADMIN minting a DEV — which matters because a DEV they created
+     * would be an account they control but are then forbidden from
+     * managing, i.e. a way to manufacture an untouchable admin.
+     */
+    const grant = canGrantRole(req.user, req.body.role);
+    if (!grant.allowed) throw new ApiError(403, grant.reason);
+
+    /*
+     * Demoting a DEV is already refused by assertCanManage above (a
+     * SUPER_ADMIN cannot manage a DEV at all). A DEV demoting another DEV
+     * is permitted, deliberately: equal rank, same rule that already lets
+     * one super admin demote another, with the DB trigger as the backstop.
+     */
+
 
     if (target.role === 'SUPER_ADMIN' && req.body.role !== 'SUPER_ADMIN') {
       await assertNotLastSuperAdmin(target);

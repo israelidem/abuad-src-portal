@@ -10,6 +10,8 @@ import { supabaseAdmin } from '../lib/supabase.js';
 import { prisma } from '../lib/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
 import { getCachedSession, cacheSession } from '../services/authCache.js';
+import { STAFF_ROLES, ADMIN_ROLES, SUPER_ADMIN_ROLES } from '../config/roles.js';
+
 
 /**
  * Resolves a bearer token to a profile.
@@ -80,12 +82,25 @@ export const requireRole =
     next();
   };
 
-// SUPER_ADMIN is included everywhere ADMIN is. It outranks ADMIN, so
-// omitting it would leave the highest role with fewer permissions than
-// the one below it.
-export const requireStaff = requireRole('REP', 'ADMIN', 'SUPER_ADMIN');
-export const requireAdmin = requireRole('ADMIN', 'SUPER_ADMIN');
-export const requireSuperAdmin = requireRole('SUPER_ADMIN');
+/*
+ * The role lists come from config/roles.js rather than being spelled out
+ * here.
+ *
+ * SUPER_ADMIN is included everywhere ADMIN is, and DEV everywhere
+ * SUPER_ADMIN is — a higher role must never end up with fewer permissions
+ * than the one below it, which is exactly what happens when a hand-written
+ * list somewhere is missed. Deriving all three from one declaration means
+ * adding DEV could not leave a route behind.
+ *
+ * requireSuperAdmin now admits DEV. That is the authorisation layer, not
+ * the UI: every settings, maintenance-mode, audit-trail and
+ * account-creation route already sits behind this middleware, so DEV gains
+ * them server-side and a crafted request from a lesser role still 403s.
+ */
+export const requireStaff = requireRole(...STAFF_ROLES);
+export const requireAdmin = requireRole(...ADMIN_ROLES);
+export const requireSuperAdmin = requireRole(...SUPER_ADMIN_ROLES);
+
 
 /**
  * Attaches `req.user` when a valid token is present, but never rejects.

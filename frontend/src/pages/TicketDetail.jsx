@@ -8,7 +8,19 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, MapPin, Clock, ThumbsUp, Lock, Send, AlertCircle } from 'lucide-react';
+import {
+  ArrowLeft,
+  MapPin,
+  Clock,
+  ThumbsUp,
+  Lock,
+  Send,
+  AlertCircle,
+  CheckCircle2,
+  Star,
+  Trash2,
+} from 'lucide-react';
+
 
 import { ticketApi } from '../lib/api.js';
 import { getAttachmentUrl } from '../lib/uploads.js';
@@ -16,15 +28,33 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 import { STATUSES, URGENCIES, CATEGORIES, timeAgo, dueLabel, formatDate } from '../lib/constants.js';
 import { Badge } from '../components/TicketCard.jsx';
+import RoleBadge from '../components/RoleBadge.jsx';
 import { Spinner, FullPageSpinner } from '../components/Spinner.jsx';
+
 import StaffControls from '../components/StaffControls.jsx';
 import ResolutionActions from '../components/ResolutionActions.jsx';
+
+/**
+ * Minutes left in the 30-minute deletion window, from the server's own
+ * `deletableUntil`.
+ *
+ * The deadline is computed server-side and serialised onto each comment, so
+ * this only formats it. A client clock that is minutes fast would otherwise
+ * hide the button early or offer it late, and in the late case the API
+ * would refuse the request — the button and the rule must agree.
+ */
+const minutesLeft = (deletableUntil) => {
+  if (!deletableUntil) return 0;
+  const ms = new Date(deletableUntil).getTime() - Date.now();
+  return ms <= 0 ? 0 : Math.max(1, Math.round(ms / 60_000));
+};
 
 export default function TicketDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isAuthenticated, isStaff } = useAuth();
   const toast = useToast();
+
 
   const [ticket, setTicket] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -34,6 +64,10 @@ export default function TicketDetail() {
   const [internal, setInternal] = useState(false);
   const [posting, setPosting] = useState(false);
   const [voting, setVoting] = useState(false);
+  // Holds the id of the comment being deleted, not a boolean: with several
+  // deletable comments on screen a shared flag would spin every button.
+  const [deleting, setDeleting] = useState(null);
+
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -98,7 +132,41 @@ export default function TicketDetail() {
     }
   };
 
+  /**
+   * Delete one of your own comments inside the 30-minute window.
+   *
+   * The row is dropped from local state on success rather than by
+   * re-fetching the page: the API has already confirmed the delete, and a
+   * full reload would throw away the reader's scroll position in a long
+   * thread for no new information.
+   *
+   * On failure the message from the API is surfaced verbatim — for an
+   * expired window that is the explanation of *why*, which a generic
+   * "Something went wrong" would hide.
+   */
+  const handleDeleteComment = async (commentId) => {
+    if (!window.confirm('Delete this comment? This cannot be undone.')) return;
+
+    setDeleting(commentId);
+    try {
+      await ticketApi.deleteComment(id, commentId);
+      setTicket((t) => ({
+        ...t,
+        comments: (t.comments ?? []).filter((c) => c.id !== commentId),
+      }));
+      toast.success('Comment deleted.');
+    } catch (err) {
+      // 403 here means the window closed while the page sat open. Re-fetch
+      // so the stale button disappears instead of inviting a second try.
+      if (err.status === 403) load();
+      toast.error(err.message);
+    } finally {
+      setDeleting(null);
+    }
+  };
+
   if (loading) return <FullPageSpinner label="Loading issue…" />;
+
 
   if (error) {
     return (
@@ -260,7 +328,29 @@ export default function TicketDetail() {
                     {event.type === 'UNASSIGNED' && 'Assignment removed'}
                     {event.type === 'CREATED' && 'Issue reported'}
                     {event.type === 'COMMENTED' && 'New comment'}
-                    {event.type === 'RATED' && 'Resolution rated'}
+                    {/*
+                      The rating itself, not just "Resolution rated".
+                      `metadata.stars` is written by rateResolution from the
+                      stored TicketRating row, so this is the persisted value
+                      — reopening the page shows the same thing.
+                    */}
+                    {event.type === 'RATED' && (
+                      <>
+                        Resolution rated{' '}
+                        <span className="inline-flex items-center gap-1 font-medium text-slate-900 dark:text-white">
+                          {event.metadata?.stars ?? '?'}/5
+                          {/* aria-hidden on the icon: the text beside it
+                              already reads "4/5", so announcing a second
+                              "star" adds noise for screen readers. */}
+                          <Star
+                            size={13}
+                            className="fill-amber-400 text-amber-400"
+                            aria-hidden="true"
+                          />
+                        </span>
+                      </>
+                    )}
+
                     {event.type === 'ATTACHMENT_ADDED' && 'Photo added'}
                     {event.type === 'DUE_DATE_CHANGED' && 'Target date changed'}
                     {/* toName is denormalised onto the event — from/to hold
@@ -280,9 +370,31 @@ export default function TicketDetail() {
                     </p>
                   )}
 
-                  <p className="text-xs text-slate-400 dark:text-slate-500">
-                    {event.actor?.fullName ?? 'System'} · {timeAgo(event.createdAt)}
+                  {/*
+                    The words the student left with their rating. Shares the
+                    quoted-aside treatment with the rep's status note above,
+                    since both are "someone's comment on this event" — but
+                    reads from `comment`, which only RATED events carry, so
+                    a rating with no comment renders nothing extra.
+                  */}
+                  {event.type === 'RATED' && event.metadata?.comment && (
+                    <p className="mt-1 border-l-2 border-amber-200 pl-2 text-sm italic text-slate-600 dark:border-amber-900/50 dark:text-slate-400">
+                      {event.metadata.comment}
+                    </p>
+                  )}
+
+                  <p className="flex flex-wrap items-center gap-1 text-xs text-slate-400 dark:text-slate-500">
+                    {/* Badge next to the actor's name, from the role the API
+                        serialised — the same component used in the comment
+                        list, so a rep looks the same in both places. */}
+                    <span className="inline-flex items-center gap-1">
+                      {event.actor?.fullName ?? 'System'}
+                      <RoleBadge role={event.actor?.role} size={12} />
+                    </span>
+                    <span aria-hidden="true">·</span>
+                    <time dateTime={event.createdAt}>{timeAgo(event.createdAt)}</time>
                   </p>
+
                 </div>
               </li>
             ))}
@@ -310,14 +422,14 @@ export default function TicketDetail() {
               }`}
             >
               <div className="mb-1 flex flex-wrap items-center gap-2 text-xs">
-                <span className="font-medium text-slate-800 dark:text-slate-100">
+                <span className="inline-flex items-center gap-1 font-medium text-slate-800 dark:text-slate-100">
                   {c.author?.fullName ?? 'Anonymous'}
+                  {/* Replaces a hand-rolled `role === 'ADMIN' ? 'Admin' :
+                      'SRC Rep'` badge, which labelled every SUPER_ADMIN and
+                      DEV as "SRC Rep". RoleBadge maps all four roles and
+                      renders nothing for students. */}
+                  <RoleBadge role={c.author?.role} size={13} />
                 </span>
-                {c.author?.role && c.author.role !== 'STUDENT' && (
-                  <Badge className="border-[#006633]/20 bg-[#006633]/10 text-[#006633]">
-                    {c.author.role === 'ADMIN' ? 'Admin' : 'SRC Rep'}
-                  </Badge>
-                )}
                 {c.isInternal && (
                   <Badge className="border-amber-300 bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200">
                     <Lock size={10} className="mr-1" />
@@ -329,12 +441,72 @@ export default function TicketDetail() {
                 </time>
               </div>
               <p className="whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-300">{c.body}</p>
+
+              {/*
+                Delete, only while the server says the window is open.
+                `canDelete` is computed in the API from the comment's own
+                createdAt against the server clock — the browser never
+                decides this, it only draws what it was told.
+              */}
+              {c.canDelete && (
+                <div className="mt-2 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteComment(c.id)}
+                    disabled={deleting === c.id}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-red-600 hover:underline disabled:opacity-50 dark:text-red-400"
+                  >
+                    {deleting === c.id ? <Spinner size="sm" /> : <Trash2 size={12} />}
+                    Delete
+                  </button>
+                  {/* The countdown is the point: without it a student has no
+                      way to know the option is about to lapse. */}
+                  <span className="text-xs text-slate-400 dark:text-slate-500">
+                    {minutesLeft(c.deletableUntil)} min left to delete
+                  </span>
+                </div>
+              )}
             </li>
           ))}
         </ul>
 
-        {isAuthenticated ? (
+
+        {/*
+          Three states, in priority order: signed out, thread closed, open.
+
+          `commentsClosed` comes from the API (true when the ticket is
+          RESOLVED/CLOSED *and* the viewer is not staff), so the rule that
+          hides this form is the same one addComment enforces — a student
+          who calls the endpoint directly gets a 403 with this same reason.
+          Staff keep their existing ability to comment and leave internal
+          notes after resolution, which is how a rep answers a follow-up.
+        */}
+        {!isAuthenticated ? (
+          <p className="flex items-center gap-2 rounded-lg bg-slate-50 p-4 text-sm text-slate-600 dark:bg-slate-900 dark:text-slate-400">
+            <AlertCircle size={16} className="shrink-0" />
+            <span>
+              <Link to="/login" className="font-medium text-[#006633] hover:underline">
+                Sign in
+              </Link>{' '}
+              to join the discussion.
+            </span>
+          </p>
+        ) : ticket.commentsClosed ? (
+          // Not a disabled textarea: an input the student cannot use is
+          // worse than none, and the existing comments above stay readable
+          // either way. Green rather than red — the thread closed because
+          // the issue was fixed, which is a good outcome, not an error.
+          <p className="flex items-start gap-2 rounded-lg border border-[#006633]/20 bg-[#006633]/5 p-4 text-sm text-slate-700 dark:border-[#006633]/40 dark:bg-[#006633]/10 dark:text-slate-300">
+            <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-[#006633]" />
+            <span>
+              <span className="font-medium">Comments are closed.</span> This issue has been
+              resolved, so the discussion is now read-only. If something is still wrong, reopen
+              the issue and the thread will reopen with it.
+            </span>
+          </p>
+        ) : (
           <form onSubmit={handleComment} className="space-y-3">
+
             <label htmlFor="comment" className="sr-only">
               Add a comment
             </label>
@@ -372,16 +544,9 @@ export default function TicketDetail() {
               </button>
             </div>
           </form>
-        ) : (
-          <p className="flex items-center gap-2 rounded-lg bg-slate-50 p-4 text-sm text-slate-600 dark:bg-slate-900 dark:text-slate-400">
-            <AlertCircle size={16} />
-            <Link to="/login" className="font-medium text-[#006633] hover:underline">
-              Sign in
-            </Link>
-            to join the discussion.
-          </p>
         )}
       </section>
+
     </div>
   );
 }

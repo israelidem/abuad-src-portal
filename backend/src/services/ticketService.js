@@ -17,6 +17,8 @@
 import { prisma } from '../lib/prisma.js';
 import { ApiError } from '../utils/ApiError.js';
 import { logger } from '../lib/logger.js';
+import { isStaffRole, isAdminRole } from '../config/roles.js';
+
 
 /** Hours to resolve, by urgency. Drives the SLA countdown and overdue flag. */
 const SLA_HOURS = {
@@ -37,9 +39,13 @@ export const calculateDueDate = (urgency, from = new Date()) => {
  * fields on a shared endpoint. Keep this as the single definition — a
  * second copy is how a new role gets missed in one place.
  */
-/** SUPER_ADMIN outranks ADMIN, so it counts as staff everywhere ADMIN does. */
-export const isStaffUser = (user) =>
-  user?.role === 'REP' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+/**
+ * SUPER_ADMIN outranks ADMIN, and DEV outranks SUPER_ADMIN, so both count
+ * as staff everywhere ADMIN does. Delegated to config/roles.js so there is
+ * one list to change rather than one per file.
+ */
+export const isStaffUser = (user) => isStaffRole(user);
+
 
 const isStaff = isStaffUser;
 
@@ -82,8 +88,122 @@ export const canViewTicket = (ticket, user) => {
  * once staff have engaged, the record needs to stay stable.
  * Admins can always edit.
  */
-/** ADMIN and above — SUPER_ADMIN must never have fewer rights than ADMIN. */
-const isAdminUser = (user) => user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+/** ADMIN and above — SUPER_ADMIN and DEV must never have fewer rights than ADMIN. */
+const isAdminUser = (user) => isAdminRole(user);
+
+/**
+ * ------------------------------------------------------------
+ * Comment rules
+ * ------------------------------------------------------------
+ */
+
+/**
+ * Statuses in which the discussion is closed to students.
+ *
+ * Tied to the lifecycle state, not to anything the frontend decides.
+ * RESOLVED and CLOSED are both terminal from a student's point of view:
+ * the work is finished and the thread is a record of it. REOPENED is
+ * deliberately absent — reopening a report is precisely the act of saying
+ * "this is not finished", so it must reopen the discussion with it.
+ *
+ * CLOSED was already refused by the POST handler with a bespoke check;
+ * that check is subsumed here so both statuses go through one rule.
+ */
+export const COMMENTS_LOCKED_STATUSES = ['RESOLVED', 'CLOSED'];
+
+/** True when the report's own state has closed the student discussion. */
+export const areCommentsLocked = (ticket) =>
+  COMMENTS_LOCKED_STATUSES.includes(ticket?.status);
+
+/**
+ * Whether `user` may post a comment on `ticket`.
+ *
+ * Staff keep their existing permissions: a rep or admin can still add a
+ * closing note, an internal note, or answer a follow-up question after
+ * resolution. Removing that would break the existing workflow where
+ * status changes carry a note (see the `note` handling in
+ * PATCH /:id/status, which writes a comment as the actor). The
+ * requirement is that *students* can no longer add to a resolved thread.
+ *
+ * Returns a reason so the API message and the UI's explanation come from
+ * the same place.
+ */
+export const canCommentOnTicket = (ticket, user) => {
+  if (!user) {
+    return { allowed: false, reason: 'Sign in to join the discussion.' };
+  }
+
+  // Staff are unaffected by the resolved lock.
+  if (isStaff(user)) return { allowed: true, reason: null };
+
+  if (areCommentsLocked(ticket)) {
+    return {
+      allowed: false,
+      reason:
+        ticket.status === 'RESOLVED'
+          ? 'This report has been resolved, so comments are now closed.'
+          : 'This report is closed, so comments are now closed.',
+    };
+  }
+
+  return { allowed: true, reason: null };
+};
+
+/**
+ * How long a student has to delete their own comment.
+ *
+ * Thirty minutes, measured from the stored `createdAt`. That column is
+ * written by the database (`default(now())`), so the window is anchored to
+ * server time and a client cannot widen it by lying about the clock —
+ * which is the whole reason the check is not `Date.now()` against a
+ * client-supplied timestamp.
+ */
+export const COMMENT_DELETE_WINDOW_MS = 30 * 60 * 1000;
+
+/** Milliseconds left in the deletion window; 0 once it has passed. */
+export const commentDeleteMsRemaining = (comment, now = new Date()) => {
+  const created = new Date(comment.createdAt).getTime();
+  const elapsed = now.getTime() - created;
+  return Math.max(0, COMMENT_DELETE_WINDOW_MS - elapsed);
+};
+
+/**
+ * Whether `user` may delete `comment`.
+ *
+ * Three separate rules, deliberately not collapsed:
+ *
+ *   Staff (REP and above) delete under the existing moderation rules,
+ *   with no time limit. That is pre-existing behaviour and moderation
+ *   would be useless with a 30-minute expiry — abuse is often reported
+ *   long after it is posted.
+ *
+ *   The author may delete their own comment, but only inside the window.
+ *
+ *   Everybody else, never. Note the ownership test comes before the
+ *   window test, so another student's expired comment and another
+ *   student's fresh comment produce the same refusal — the response must
+ *   not become an oracle for other people's comment timestamps.
+ */
+export const canDeleteComment = (comment, user, now = new Date()) => {
+  if (!user) return { allowed: false, reason: 'Sign in to manage your comments.' };
+
+  if (isStaff(user)) return { allowed: true, reason: null, isModeration: true };
+
+  if (comment.authorId !== user.id) {
+    return { allowed: false, reason: 'You can only delete your own comments.' };
+  }
+
+  if (commentDeleteMsRemaining(comment, now) <= 0) {
+    return {
+      allowed: false,
+      reason:
+        'The 30-minute window for deleting this comment has passed. Ask an SRC admin if it needs removing.',
+    };
+  }
+
+  return { allowed: true, reason: null, isModeration: false };
+};
+
 
 export const canEditTicket = (ticket, user) => {
   if (!user) return false;
@@ -114,8 +234,23 @@ export const ticketInclude = {
   attachments: {
     select: { id: true, storagePath: true, thumbPath: true, mimeType: true, sizeBytes: true },
   },
+  /*
+   * The resolution rating, if the reporter has left one.
+   *
+   * This is the fix for "the feedback request keeps coming back". The row
+   * was always written, and `ticket_ratings.ticket_id` is UNIQUE so a
+   * second one was always refused — but the ticket payload never carried
+   * it. ResolutionActions initialises its `rated` flag from
+   * `ticket.rating`, which was therefore permanently undefined, so the
+   * form re-appeared on every mount: refresh, re-login, navigate away and
+   * back. The state was persisted all along; it simply was not being
+   * read. Including it here fixes all four cases at once, from the
+   * database, without a new table or any client-side storage.
+   */
+  rating: { select: { id: true, score: true, comment: true, createdAt: true } },
   _count: { select: { comments: true, votes: true } },
 };
+
 
 /**
  * Converts a ticket row into an API response.
@@ -176,14 +311,50 @@ export const serialiseTicket = (ticket, viewer = null, { hasVoted = null } = {})
     createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt,
 
+    /*
+     * The reporter's resolution rating, when one exists.
+     *
+     * Only the reporter and staff see it: for the reporter it is what
+     * suppresses the feedback form for good, and for staff it is the
+     * service-quality signal they act on. A third party reading a public
+     * ticket has no business with it.
+     *
+     * `null` (not `undefined`) when absent, so the client can distinguish
+     * "loaded, not rated" from "not loaded" — the difference between
+     * showing the form and showing nothing yet.
+     */
+    rating:
+      ticket.rating && (viewerIsAuthor || viewerIsStaff)
+        ? {
+            score: ticket.rating.score,
+            comment: ticket.rating.comment ?? null,
+            createdAt: ticket.rating.createdAt,
+          }
+        : null,
+
     // Lets the client render the right controls without duplicating rules
     permissions: {
       canEdit: canEditTicket(ticket, viewer),
       canDelete: canDeleteTicket(ticket, viewer),
       canManage: viewerIsStaff,
-      canComment: Boolean(viewer),
+      /*
+       * `canComment` was `Boolean(viewer)` — "signed in" — which is why a
+       * resolved report still showed a comment box. It now carries the
+       * real answer, from the same function the POST handler enforces
+       * with, so the button and the API can never disagree.
+       */
+      canComment: canCommentOnTicket(ticket, viewer).allowed,
+      /*
+       * Why the discussion is closed, for the UI to explain itself.
+       * Null when it is open, so the client tests one field rather than
+       * re-deriving the rule from `status`.
+       */
+      commentsLockedReason: areCommentsLocked(ticket)
+        ? canCommentOnTicket(ticket, viewer).reason
+        : null,
     },
   };
+
 
   if (hasVoted !== null) base.hasVoted = hasVoted;
 
@@ -244,10 +415,34 @@ export const serialiseComment = (comment, viewer = null) => {
 
     permissions: {
       canEdit: isOwnComment || isAdminUser(viewer),
-      canDelete: isOwnComment || viewerIsStaff,
+      /*
+       * Was `isOwnComment || viewerIsStaff`, i.e. an author could delete
+       * their own comment forever. The 30-minute window is now applied
+       * from the same helper the DELETE handler uses, so what the UI
+       * offers and what the API permits are the same decision.
+       */
+      canDelete: canDeleteComment(comment, viewer).allowed,
     },
+
+    /*
+     * When the author's deletion window closes, as an absolute instant.
+     *
+     * Sent as an ISO timestamp derived from the server's own clock rather
+     * than as "minutes left", so a client whose clock is wrong shows the
+     * wrong countdown but still cannot delete late — the server re-checks
+     * regardless. Omitted entirely once the window has passed or for
+     * anyone but the author, so it never leaks other people's timings.
+     */
+    ...(isOwnComment && !viewerIsStaff && commentDeleteMsRemaining(comment) > 0
+      ? {
+          deletableUntil: new Date(
+            new Date(comment.createdAt).getTime() + COMMENT_DELETE_WINDOW_MS
+          ).toISOString(),
+        }
+      : {}),
   };
 };
+
 
 
 /**
