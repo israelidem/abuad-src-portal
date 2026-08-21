@@ -22,7 +22,10 @@ import departmentRoutes from './src/routes/departmentRoutes.js';
 import notificationRoutes from './src/routes/notificationRoutes.js';
 import adminRoutes from './src/routes/adminRoutes.js';
 import announcementRoutes from './src/routes/announcementRoutes.js';
+import uploadRoutes from './src/routes/uploadRoutes.js';
 import { maintenanceGuard } from './src/middleware/maintenance.js';
+import { warmPatternCache } from './src/lib/textModeration.js';
+import { BUILTIN_WORDLIST } from './src/config/moderationWordlist.js';
 
 const app = express();
 
@@ -84,6 +87,7 @@ app.use('/api/tickets', ticketRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/announcements', announcementRoutes);
+app.use('/api/uploads', uploadRoutes);
 app.use('/api/admin', adminRoutes);
 
 app.use(notFoundHandler);
@@ -91,6 +95,47 @@ app.use(errorHandler);
 
 const server = app.listen(env.port, () => {
   logger.info('server.started', { port: env.port, env: env.nodeEnv });
+
+  /**
+   * Pre-compile the moderation patterns.
+   *
+   * Deliberately AFTER listen() and deliberately not awaited: the health
+   * check must be answerable immediately. Render treats a slow first
+   * response as a failed deploy, so blocking boot on ~2s of regex
+   * compilation would trade a comment-latency problem for a deploy problem.
+   *
+   * Measured effect (scripts/verify-warmup.mjs, separate processes):
+   *   without warm-up   first comment 4782ms
+   *   with warm-up      first comment  163ms   (29x), boot cost 1965ms
+   *
+   * Built-ins only. Admin terms live in the database and getActiveTerms()
+   * compiles them on first use — a handful of extra terms is a few hundred
+   * ms once, and fetching them here would add a DB round-trip to boot on a
+   * path that must not fail if the database is briefly unreachable.
+   */
+  warmPatternCache(BUILTIN_WORDLIST)
+    .then(({ compiled, skipped, ms }) => {
+      logger.info('moderation.patterns_warmed', {
+        compiled,
+        skipped,
+        ms: Math.round(ms),
+      });
+      // skipped > 0 means a term could not be compiled into a valid regex.
+      // Those terms are silently not enforced, so say so loudly.
+      if (skipped > 0) {
+        logger.warn('moderation.patterns_skipped', {
+          skipped,
+          hint: 'These terms are NOT being enforced. See _badTerms() in textModeration.js.',
+        });
+      }
+    })
+    .catch((error) => {
+      // Never fatal: a failed warm-up costs latency, not correctness — the
+      // patterns will compile lazily on the first comment as before.
+      logger.warn('moderation.warm_failed', {
+        reason: error?.message?.split('\n')[0],
+      });
+    });
 });
 
 const shutdown = async (signal) => {

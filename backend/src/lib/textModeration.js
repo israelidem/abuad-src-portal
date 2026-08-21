@@ -287,6 +287,124 @@ const patternFor = (term) => {
 
 /** Exposed so callers/tests can assert no term silently failed to compile. */
 export const _badTermCount = () => badTerms.size;
+
+/**
+ * Compiles patterns ahead of time, so the first student to comment after a
+ * deploy does not pay for it.
+ *
+ * WHY THIS EXISTS — measured, not assumed.
+ *
+ * scripts/experiment-pattern-shape.mjs isolates the cost of a term's
+ * pattern into three parts, for 400 terms against a 2000-char body:
+ *
+ *     construction      5415ms   (~13.5ms per RegExp)
+ *     first exec()      6106ms   (~15.3ms per pattern)
+ *     steady state         2.1ms  for all 400 together
+ *
+ * So a term costs ~29ms once, and ~0.005ms every time after. Steady state
+ * is ~2900x cheaper than the first pass. The expansion is why: one
+ * 12-character term becomes a 497-character pattern of nested bounded
+ * quantifiers, and V8 interprets a new regex before tiering it up to
+ * compiled code.
+ *
+ * Left alone, that one-off cost lands *inside* comment submissions —
+ * ~29ms of blocked event loop each, until every term has been seen once.
+ * With 115 built-in terms that is ~3.3s of blocking spread over the first
+ * ~115 comments after every restart. On a free-tier host that sleeps and
+ * cold-starts, that repeats all day.
+ *
+ * NOT fixed by shrinking the pattern. Dropping the separated-repeat group
+ * makes patterns 232 chars and 1.7x cheaper, and dropping separator
+ * tolerance entirely gets 9.7x — but those are exactly what catch
+ * "F.U.U.C.K" and "f u c k", which tests in textModeration.test.mjs pin.
+ * Trading detection for latency is the wrong trade, so the cost is moved
+ * rather than removed.
+ *
+ * Chunked and yielding: warming 115 terms in one synchronous pass would
+ * block for ~3.3s at boot, which is just as bad as blocking during
+ * requests if it delays the health check. Each chunk yields to the event
+ * loop, so the server stays responsive while it warms.
+ *
+ * Safe to call more than once, and safe to call with terms already
+ * cached — patternFor() short-circuits on a hit, so re-warming after an
+ * admin adds a word only compiles what is genuinely new.
+ *
+ * @returns {Promise<{compiled: number, skipped: number, ms: number}>}
+ */
+export const warmPatternCache = async (terms, { chunkSize = 10, sample } = {}) => {
+  /**
+   * The warm-up exec MUST run against text of realistic length.
+   *
+   * My first version exec'd against the 6-character string 'warmup' and
+   * only moved 7309ms → 2818ms — it looked like a partial win but was
+   * mostly the construction half. V8 tiers a regex up based on the work it
+   * actually does, and a 6-character subject does almost none, so the
+   * ~15ms-per-pattern first-exec cost was still waiting for the first real
+   * 600-char comment. Caught by scripts/verify-warmup.mjs, which is why
+   * that script exec's the real service rather than this function.
+   *
+   * Deliberately contains no prohibited term: a match returns early at the
+   * first hit, whereas a clean subject forces the full scan — the
+   * pessimistic path, which is the one worth pre-paying.
+   */
+  const subject =
+    sample ??
+    'the hostel water supply has been unreliable for several weeks and the maintenance team has not responded to any of the requests submitted through the portal '.repeat(
+      13
+    );
+
+  const started = process.hrtime.bigint();
+  let compiled = 0;
+  let skipped = 0;
+
+  const list = Array.isArray(terms) ? terms : [];
+
+  for (let i = 0; i < list.length; i += chunkSize) {
+    for (const entry of list.slice(i, i + chunkSize)) {
+      const term = typeof entry === 'string' ? entry : entry?.term;
+      if (!term) continue;
+
+      // MUST match analyseText's key exactly, or this warms the wrong
+      // entries and the request path still pays full price.
+      //
+      // analyseText computes `term.toLowerCase().trim()` and nothing more.
+      // My first version of this function used
+      // `collapseRuns(normaliseForMatching(term))` instead, which is a
+      // *different* string for any term containing a triple letter or an
+      // accent — "fuuuck" normalises to "fuuck". The cache would then hold
+      // an entry under a key no lookup ever uses: warm-up appears to
+      // succeed, cache size goes up, and the first real comment still
+      // blocks for ~29ms. Silent, and invisible to a test that only
+      // asserts the warm-up ran.
+      const canonical = term.toLowerCase().trim();
+      if (!canonical) continue;
+
+      const before = patternCache.size;
+      // Compiling is the point; the pattern itself is discarded because
+      // patternFor() has already stored it.
+      const pattern = patternFor(canonical);
+
+      if (pattern === null) skipped += 1;
+      else if (patternCache.size > before) compiled += 1;
+
+      // Pays the interpreter-tier cost here rather than on the first real
+      // comment. Must use the long subject — see the note above.
+      if (pattern) {
+        pattern.lastIndex = 0;
+        pattern.exec(subject);
+        pattern.lastIndex = 0;
+      }
+    }
+
+    // Yield, so a long list cannot monopolise the loop at boot.
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  return { compiled, skipped, ms: Number(process.hrtime.bigint() - started) / 1e6 };
+};
+
+/** Exposed so a health check can name the terms that failed to compile. */
 export const _badTerms = () => [...badTerms];
 
 /** Exposed for tests and diagnostics. */

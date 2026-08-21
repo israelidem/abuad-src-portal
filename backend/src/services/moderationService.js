@@ -35,6 +35,34 @@ import { BUILTIN_WORDLIST, ALLOWLIST } from '../config/moderationWordlist.js';
 
 const CACHE_TTL_MS = 30_000;
 
+/**
+ * Hard ceiling on *enabled* admin terms, set from measurement rather than
+ * taste. `scripts/bench-moderation.mjs` times analyseText() against a
+ * 2000-character comment (the schema maximum) as the list grows:
+ *
+ *      terms   mean     p99
+ *          0   0.4ms    ~2ms
+ *         50   0.3ms    ~1ms
+ *        200   1.0ms    ~5ms
+ *        500   2.6ms    ~7ms
+ *       1000  16-37ms   87-144ms
+ *
+ * The filter runs synchronously inside the comment-submission request, so
+ * that last row is not merely slow for the poster — it is tens of
+ * milliseconds during which Node's single thread serves nobody. At 1000
+ * terms the engine costs ~45-90x the empty list.
+ *
+ * 400 sits inside the measured-flat region with headroom. It is also far
+ * more than a real blocklist needs: the built-in list handles the general
+ * case, and admin entries exist for campus-specific slurs, which number in
+ * the tens.
+ *
+ * The previous value was 2000, chosen to bound memory and query time. That
+ * reasoning was sound but incomplete — it bounded the *fetch* and ignored
+ * the per-comment CPU cost of matching, which is the expensive part.
+ */
+const MAX_ACTIVE_ADMIN_TERMS = 400;
+
 /** Moderation workflow states. Mirrors the SQL CHECK constraint. */
 export const MODERATION_STATUS = Object.freeze({
   APPROVED: 'APPROVED',
@@ -107,6 +135,34 @@ export const normaliseTerm = (term) =>
     .trim();
 
 
+let lastCapWarnedAt = 0;
+
+/**
+ * Warns that enabled terms exceed the cap, so the excess is not silently
+ * ignored. Throttled: this fires on cache misses, which are frequent.
+ *
+ * Declared above its caller deliberately — a `const` arrow used by a
+ * function defined earlier only works because the call happens after
+ * module evaluation, and relying on that is a trap for the next edit.
+ */
+const warnTermCapReached = () => {
+  if (Date.now() - lastCapWarnedAt < WARN_INTERVAL_MS) return;
+  lastCapWarnedAt = Date.now();
+
+  logger.warn('moderation.term_cap_reached', {
+    cap: MAX_ACTIVE_ADMIN_TERMS,
+    hint:
+      `More than ${MAX_ACTIVE_ADMIN_TERMS} moderation words are enabled. ` +
+      'Only the oldest are being applied, because beyond this size the ' +
+      'per-comment filter cost starts to block the event loop (see ' +
+      'scripts/bench-moderation.mjs). Disable unused terms, or prefer ' +
+      'shorter stems that match more variants.',
+  });
+};
+
+/** Exposed so tests and diagnostics can assert the cap without importing internals. */
+export const _maxActiveAdminTerms = () => MAX_ACTIVE_ADMIN_TERMS;
+
 /**
  * Combined term list: built-in entries plus enabled admin entries.
  *
@@ -122,12 +178,26 @@ export const getActiveTerms = async ({ force = false } = {}) => {
   try {
     const rows = await prisma.moderationWord.findMany({
       where: { isEnabled: true },
-      // Bounded deliberately. An unbounded findMany here would be a slow
-      // query on every cache miss if the table ever grew large, and a
-      // blocklist beyond this size is a sign of misuse, not of need.
-      take: 2000,
+      // Oldest first, so which terms survive the cap is deterministic and
+      // stable across instances. Without an explicit order, Postgres may
+      // return rows in any order and two instances could silently enforce
+      // different halves of an over-sized list.
+      orderBy: { createdAt: 'asc' },
+      // See MAX_ACTIVE_ADMIN_TERMS: this bounds per-comment CPU, not just
+      // the query. Fetching one extra row is how we detect that the cap
+      // was actually hit without a second COUNT query.
+      take: MAX_ACTIVE_ADMIN_TERMS + 1,
       select: { term: true, category: true, severity: true },
     });
+
+    if (rows.length > MAX_ACTIVE_ADMIN_TERMS) {
+      rows.length = MAX_ACTIVE_ADMIN_TERMS;
+      // Loud, because the effect is silent otherwise: terms beyond the cap
+      // are simply not enforced, and an admin would reasonably assume a
+      // word they can see in the list is active. Rate-limited by the same
+      // interval as the read-failure warning.
+      warnTermCapReached();
+    }
 
     wordCache = [...BUILTIN_WORDLIST, ...rows];
     wordCachedAt = Date.now();
