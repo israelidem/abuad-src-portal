@@ -24,6 +24,8 @@ import {
   ChevronDown,
   Building2,
   Code2,
+  MessageSquareWarning,
+  Star,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { adminApi } from '../lib/api.js';
@@ -31,6 +33,7 @@ import Logo from './Logo.jsx';
 import NotificationBell from './NotificationBell.jsx';
 import ThemeToggle from './ThemeToggle.jsx';
 import ContactDeveloper from './ContactDeveloper.jsx';
+import RatingPrompt from './RatingPrompt.jsx';
 
 const FOREST_GREEN = '#006633';
 
@@ -39,6 +42,13 @@ const NAV = [
   { to: '/tickets', label: 'Issues', icon: ListChecks, access: 'public' },
   { to: '/announcements', label: 'News', icon: Megaphone, access: 'public' },
   { to: '/tickets/new', label: 'Report', icon: PlusCircle, access: 'auth' },
+  /**
+   * §9. Sits beside "Report" deliberately: the two are adjacent in the
+   * user's mind ("something is wrong") and putting them side by side is
+   * what makes the labels do the disambiguating — "Report" raises an SRC
+   * issue, "Feedback" reports a fault in the website itself.
+   */
+  { to: '/feedback', label: 'Feedback', icon: MessageSquareWarning, access: 'auth' },
 ];
 
 /**
@@ -54,6 +64,12 @@ const ADMIN_NAV = [
   { to: '/admin/analytics', label: 'Analytics', icon: BarChart3, access: 'staff' },
   { to: '/admin/users', label: 'Users', icon: Users, access: 'staff' },
   { to: '/admin/moderation', label: 'Moderation', icon: ShieldAlert, access: 'admin' },
+  /**
+   * Staff, not admin: reviewing bug reports and ratings needs no ability
+   * to unmask an anonymous author, so it matches the requireStaff guard on
+   * GET /api/feedback rather than the stricter moderation guard.
+   */
+  { to: '/admin/feedback', label: 'Feedback & ratings', icon: Star, access: 'staff' },
   { to: '/admin/departments', label: 'Departments', icon: Building2, access: 'admin' },
   { to: '/admin/settings', label: 'Portal settings', icon: Settings, access: 'superadmin' },
 ];
@@ -404,6 +420,17 @@ export default function Layout() {
       </footer>
 
       <ContactDeveloper open={contactOpen} onClose={() => setContactOpen(false)} />
+
+      {/*
+        §10. Mounted in the shell so the timer survives navigation — a
+        per-page mount would restart the countdown on every click and the
+        prompt would never reach its threshold for an active user.
+
+        It renders null unless the server says to ask, so for the vast
+        majority of page views this costs one cached request and nothing
+        else. Only for signed-in users: the endpoint requires a session.
+      */}
+      {isAuthenticated && <RatingPrompt />}
     </div>
   );
 }

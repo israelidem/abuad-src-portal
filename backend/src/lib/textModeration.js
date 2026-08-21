@@ -166,6 +166,32 @@ const escapeInClass = (s) => s.replace(/[\\\]^-]/g, '\\$&');
 const escapeLiteral = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
 
 /**
+ * The set of letters a term genuinely requires, cached per term.
+ *
+ * Used by the pre-filter in analyseText. Separators (space/hyphen/underscore)
+ * and literal characters are excluded: only characters that compile to a
+ * `[class]` unit are mandatory in the "some character must represent this
+ * letter" sense.
+ */
+const requiredLettersCache = new Map();
+
+const requiredLettersFor = (canonical) => {
+  const cached = requiredLettersCache.get(canonical);
+  if (cached) return cached;
+
+  const letters = new Set();
+  for (const ch of canonical) {
+    if (LETTER_CLASSES[ch]) letters.add(ch);
+  }
+
+  // Bounded for the same reason patternCache is: an admin list is finite,
+  // but nothing should grow without limit in a long-lived process.
+  if (requiredLettersCache.size < 5000) requiredLettersCache.set(canonical, letters);
+  return letters;
+};
+
+
+/**
  * Compiles one term into a tolerant, anchored regex.
  *
  * Letters become `[class]{1,3}`; spaces in a phrase become "any number of
@@ -413,23 +439,40 @@ export const _patternCacheSize = () => patternCache.size;
 /**
  * The set of canonical letters the text *could* contain.
  *
- * A term whose first letter isn't in this set cannot possibly match, so its
- * regex is never run. With a few hundred terms this skips the large
- * majority of scans on a typical comment. Multi-valued mapping keeps it
- * sound — it never rejects a term that would have matched.
+ * Soundness requirement: this MUST be a superset of the letters the text
+ * can spell, or the prefilter in analyseText will reject a term that would
+ * have matched — a silent filter bypass.
+ *
+ * THE BUG THIS COMMENT EXISTS FOR.
+ *
+ * The `a`-`z` branch used to `continue` after adding the character itself,
+ * skipping the CHAR_TO_LETTERS lookup below. That lookup is not redundant:
+ * plain letters are themselves substitutes for *other* letters. `k` is in
+ * class `c` ('ck(<{[¢'), `z` is in class `s` ('s5$z'), `v` is in class `u`,
+ * `i` is in class `l`, and so on.
+ *
+ * So "kunt" registered only {k,u,n,t}, never `c`. That was harmless while
+ * the prefilter tested a term's first letter and little else, but the
+ * moment it required *every* letter, the term "cunt" was skipped without
+ * running its pattern — which does match "kunt" via the `c` class. Same for
+ * "zhit" vs "shit", "vgly" vs "ugly". Caught by the "resists filter bypass"
+ * test in textModeration.test.mjs.
+ *
+ * A plain letter therefore contributes itself AND every letter it could
+ * stand in for. Slightly larger set, still far smaller than the alphabet
+ * for real text, and sound.
  */
 const possibleLetters = (text) => {
   const set = new Set();
   for (const ch of text) {
-    if (ch >= 'a' && ch <= 'z') {
-      set.add(ch);
-      continue;
-    }
+    if (ch >= 'a' && ch <= 'z') set.add(ch);
+    // NOT an else — see above. A letter can also substitute for others.
     const mapped = CHAR_TO_LETTERS.get(ch);
     if (mapped) for (const l of mapped) set.add(l);
   }
   return set;
 };
+
 
 /**
  * Blanks out allowlisted words so they cannot contribute to a match.
@@ -510,10 +553,31 @@ export const analyseText = (text, { terms = [], allowlist = [] } = {}) => {
     const canonical = term.toLowerCase().trim();
     if (!canonical) continue;
 
-    // Cheap reject: first letter of the term can't be represented anywhere
-    // in the text, so the pattern cannot match.
-    const first = canonical[0];
-    if (LETTER_CLASSES[first] && !available.has(first)) continue;
+    // Cheap reject — the difference between ~25ms and ~1ms per comment.
+    //
+    // This used to test only `canonical[0]`, which is far too weak to be
+    // worth much: a term starting with a common letter (a, e, s, t...) got
+    // past it on essentially every comment, because ordinary English prose
+    // contains every common letter. Measured with 400 terms against a
+    // 2000-char clean body, that meant ~400 full regex scans per comment:
+    // 25ms median, 58ms worst case of *synchronous* CPU, which caps one
+    // Node process near 40 comment submissions/sec regardless of database
+    // speed. scripts/probe-steady-state.mjs has the distribution.
+    //
+    // Requiring EVERY letter of the term instead is still sound — the
+    // char→letter mapping is multi-valued, so `available` is a superset of
+    // what the text could spell, and a term is only skipped when some
+    // letter it needs has no possible representation anywhere in the text.
+    // No match that would have fired can be rejected here.
+    let possible = true;
+    for (const letter of requiredLettersFor(canonical)) {
+      if (!available.has(letter)) {
+        possible = false;
+        break;
+      }
+    }
+    if (!possible) continue;
+
 
     const pattern = patternFor(canonical);
     if (!pattern) continue; // uncompilable term — skipped, not fatal

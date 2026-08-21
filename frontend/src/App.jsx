@@ -37,10 +37,12 @@ const TicketList = lazy(() => import('./pages/TicketList.jsx'));
 const TicketDetail = lazy(() => import('./pages/TicketDetail.jsx'));
 const NewTicket = lazy(() => import('./pages/NewTicket.jsx'));
 const Profile = lazy(() => import('./pages/Profile.jsx'));
+const Feedback = lazy(() => import('./pages/Feedback.jsx'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard.jsx'));
 const Analytics = lazy(() => import('./pages/Analytics.jsx'));
 const UserManagement = lazy(() => import('./pages/UserManagement.jsx'));
 const Moderation = lazy(() => import('./pages/Moderation.jsx'));
+const FeedbackReview = lazy(() => import('./pages/FeedbackReview.jsx'));
 const DepartmentManagement = lazy(() => import('./pages/DepartmentManagement.jsx'));
 const PortalSettings = lazy(() => import('./pages/PortalSettings.jsx'));
 const Announcements = lazy(() => import('./pages/Announcements.jsx'));
@@ -99,6 +101,9 @@ export default function App() {
                   <Route element={<RequireAuth />}>
                     <Route path="dashboard" element={<Dashboard />} />
                     <Route path="profile" element={<Profile />} />
+                    {/* Signed-in only: every report is attributed, which is
+                        what makes the per-user daily cap enforceable. */}
+                    <Route path="feedback" element={<Feedback />} />
                   </Route>
 
                   {/* REP and ADMIN */}
@@ -106,6 +111,10 @@ export default function App() {
                     <Route path="admin" element={<AdminDashboard />} />
                     <Route path="admin/analytics" element={<Analytics />} />
                     <Route path="admin/users" element={<UserManagement />} />
+                    {/* Staff-level: matches requireStaff on GET /api/feedback.
+                        Reviewing bug reports needs no unmasking ability, so it
+                        does not belong behind the stricter admin guard. */}
+                    <Route path="admin/feedback" element={<FeedbackReview />} />
                   </Route>
 
                   {/* ADMIN only — the moderation queue can unmask an

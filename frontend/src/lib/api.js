@@ -239,6 +239,33 @@ export const adminApi = {
   maintenance: (options) => api.get('/api/admin/maintenance', { ...options, auth: false }),
 };
 
+export const feedbackApi = {
+  /// §9 — a user reporting a problem with the portal itself.
+  submit: (payload) => api.post('/api/feedback', payload),
+  mine: (options) => api.get('/api/feedback/mine', options),
+
+  /// Admin review queue. Cursor-paginated; `counts` drives the filter tabs.
+  list: (params, options) => api.get('/api/feedback', { ...options, params }),
+  update: (id, payload) => api.patch(`/api/feedback/${id}`, payload),
+
+  /**
+   * §10 — the rating prompt asks the server whether it should appear.
+   *
+   * Deliberately not a localStorage check: the "don't nag" rule has to
+   * hold across devices and survive clearing site data, which only the
+   * server can guarantee.
+   */
+  ratingState: (options) => api.get('/api/feedback/ratings/state', options),
+
+  /// `dismissed: true` with no stars records a skip. The prompt round is
+  /// assigned server-side, so it is not sent here.
+  submitRating: (payload) => api.post('/api/feedback/ratings', payload),
+
+  ratingSummary: (options) => api.get('/api/feedback/ratings/summary', options),
+  ratingList: (params, options) =>
+    api.get('/api/feedback/ratings/list', { ...options, params }),
+};
+
 export const notificationApi = {
   list: (params, options) => api.get('/api/notifications', { ...options, params }),
   markRead: (id) => api.patch(`/api/notifications/${id}/read`),

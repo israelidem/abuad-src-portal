@@ -1,0 +1,19 @@
+
+Backend test suite — 12 files
+
+  PASS  adminUserCreation.test.mjs         12 passed, 0 failed
+  PASS  authCache.test.mjs                 10 passed, 0 failed
+  PASS  cloudinary.test.mjs                20 passed, 0 failed
+  PASS  feedbackAndRatings.test.mjs        33 passed, 0 failed
+  PASS  identityUniqueness.test.mjs        21 passed, 0 failed
+  PASS  moderationService.test.mjs         10 passed, 0 failed
+  PASS  observability.test.mjs             10 passed, 0 failed
+  PASS  rateLimiter.test.mjs               18 passed, 0 failed
+  PASS  settingsRegistry.test.mjs          8 passed, 0 failed
+  PASS  signupControl.test.mjs             17 passed, 0 failed
+  PASS  textModeration.test.mjs            72 passed, 0 failed
+  PASS  ticketVisibility.test.mjs          22 passed, 0 failed
+
+  TOTAL: 253 passed, 0 failed
+  ✔ Suite green.
+
