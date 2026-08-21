@@ -23,6 +23,7 @@ import notificationRoutes from './src/routes/notificationRoutes.js';
 import adminRoutes from './src/routes/adminRoutes.js';
 import announcementRoutes from './src/routes/announcementRoutes.js';
 import uploadRoutes from './src/routes/uploadRoutes.js';
+import feedbackRoutes from './src/routes/feedbackRoutes.js';
 import { maintenanceGuard } from './src/middleware/maintenance.js';
 import { warmPatternCache } from './src/lib/textModeration.js';
 import { BUILTIN_WORDLIST } from './src/config/moderationWordlist.js';
@@ -88,6 +89,7 @@ app.use('/api/departments', departmentRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/announcements', announcementRoutes);
 app.use('/api/uploads', uploadRoutes);
+app.use('/api/feedback', feedbackRoutes);
 app.use('/api/admin', adminRoutes);
 
 app.use(notFoundHandler);

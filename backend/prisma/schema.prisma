@@ -125,6 +125,14 @@ model Profile {
   moderationWords   ModerationWord[]   @relation("ModerationWordAuthor")
   moderationActions ModerationAction[] @relation("ModerationActor")
 
+  /// Portal feedback (§9) and portal ratings (§10). The two feedback
+  /// relations are named for the same reason as the moderation ones —
+  /// author and resolver are separate links to the same model, and Prisma
+  /// cannot infer which is which.
+  portalFeedback    PortalFeedback[]   @relation("FeedbackAuthor")
+  resolvedFeedback  PortalFeedback[]   @relation("FeedbackResolver")
+  portalRatings     PortalRating[]
+
 
   /// Which SRC desk this rep/admin staffs — deliberately *not* the
   /// `department` field above, which is the student's own academic
@@ -575,4 +583,96 @@ model AuditLog {
   @@index([actorId, createdAt])
   @@index([entityType, entityId])
   @@map("audit_logs")
+}
+
+/// Feedback about the portal software itself — bugs, suggestions,
+/// usability problems.
+///
+/// Deliberately not a Ticket. A Ticket is an SRC complaint routed to a
+/// department and worked by student reps; this is a bug report read by
+/// whoever maintains the software. Filing "the star button is broken on
+/// iPhone" into the Welfare queue would bury it and waste a caseworker's
+/// time.
+model PortalFeedback {
+  id          String   @id @default(uuid()) @db.Uuid
+
+  /// Nullable + SetNull: deleting an account must not delete the bug
+  /// reports it filed. A reproducible crash report keeps its value after
+  /// the reporter graduates.
+  userId      String?  @map("user_id") @db.Uuid
+  user        Profile? @relation("FeedbackAuthor", fields: [userId], references: [id], onDelete: SetNull)
+
+  category    String
+  subject     String
+  description String
+
+  /// Cloudinary public_id, same convention as TicketAttachment.storagePath.
+  screenshotPath String? @map("screenshot_path")
+
+  status      String   @default("NEW")
+
+  /// Captured at submit time: "the page went blank" is unactionable
+  /// without knowing the browser, and asking the reporter to find their
+  /// own user agent is worse than reading it.
+  ///
+  /// No IP address by design — it would make every row personal data
+  /// under a retention obligation, to diagnose bugs that the user agent
+  /// and page URL already explain.
+  userAgent   String?  @map("user_agent")
+  pageUrl     String?  @map("page_url")
+  appVersion  String?  @map("app_version")
+
+  adminNotes  String?  @map("admin_notes")
+  resolvedById String? @map("resolved_by") @db.Uuid
+  resolvedBy  Profile? @relation("FeedbackResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+  resolvedAt  DateTime? @map("resolved_at")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+  @@map("portal_feedback")
+}
+
+/// A user's star rating of the portal.
+///
+/// Distinct from TicketRating, which is one row per ticket ("how well was
+/// my complaint handled"). This is one row per user per prompt round
+/// ("how good is this portal"). Reusing TicketRating would require a
+/// nullable ticketId and would silently change the meaning of every
+/// existing average-satisfaction query.
+model PortalRating {
+  id          String   @id @default(uuid()) @db.Uuid
+
+  /// Cascade, unlike PortalFeedback: an aggregate star score has no
+  /// standalone value once the account is gone, and orphaned rows would
+  /// skew the average with votes from users who no longer exist.
+  userId      String   @map("user_id") @db.Uuid
+  user        Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// 1-5 for a real rating; 0 when dismissed. A DB CHECK ties `stars` and
+  /// `dismissed` together so a row cannot claim to be both.
+  stars       Int      @db.SmallInt
+  reason      String?
+
+  /// Which prompt produced this, so a later rating is comparable to an
+  /// earlier one instead of overwriting it — a trend rather than only the
+  /// latest opinion.
+  promptRound Int      @default(1) @map("prompt_round")
+
+  appVersion  String?  @map("app_version")
+
+  /// Dismissals are stored as rows so the prompt knows not to ask again.
+  dismissed   Boolean  @default(false)
+
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  /// The anti-abuse guarantee, in the database rather than the API: two
+  /// concurrent submits both pass an application-level "already rated?"
+  /// check and both insert. This makes the second fail regardless of
+  /// timing.
+  @@unique([userId, promptRound])
+  @@index([userId, createdAt])
+  @@map("portal_ratings")
 }
