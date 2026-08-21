@@ -19,3 +19,5 @@ frontend/.env.*
 
 # Build output
 frontend/dist/
+backend/.suite.log 
+.verify-server.log 
